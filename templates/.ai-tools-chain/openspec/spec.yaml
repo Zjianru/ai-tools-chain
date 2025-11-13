@@ -1,0 +1,36 @@
+meta:
+  id: "DEMO-001"
+  title: "示例任务：为 /api/sum 增加错误处理并补单测"
+  owner: "@you"
+  risk: "medium"
+
+requirements:
+  - id: R1
+    text: "当任一参数不是数字时，返回 400 与明确错误码"
+  - id: R2
+    text: "当内部错误时，记录日志并返回 500"
+
+non_functional:
+  - "新增的日志打印必须通过 lint 检查"
+  - "新增/修改的代码必须覆盖率 >= 70%"
+
+targets:
+  files:
+    - "src/api/sum.ts"
+    - "tests/api/sum.test.ts"
+  globs:
+    - "src/**/sum*.ts"
+
+guardrails:
+  dangerous_paths: [".github/", "deploy/", "k8s/"]
+  allow_delete: false
+  max_files: 10
+  max_lines: 1000
+  whitelist: "*"
+
+acceptance:
+  steps:
+    - "lint 通过"
+    - "测试通过"
+    - "promptfoo 评分 >= 0.7"
+

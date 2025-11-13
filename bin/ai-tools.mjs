@@ -10,7 +10,8 @@ import { execa } from "execa";
 import readline from "readline";
 import ini from "ini";
 import { runCodegen, runReview, runSecondOpinion } from "../src/providers/index.mjs";
-import { invokeRole } from "../src/models/broker.mjs";
+import { invokeRole, loadModelsConfig } from "../src/models/broker.mjs";
+import path from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -175,6 +176,110 @@ function appendJSONL(file, obj) {
     appendFileSync(file, JSON.stringify(obj) + "\n", "utf-8");
 }
 
+// -------- OpenSpec helpers (minimal YAML-ish parser) --------
+function parseOpenSpecYAML(text) {
+    // very small parser for our expected fields only
+    const lines = text.split(/\r?\n/);
+    const out = { meta: {}, requirements: [], targets: { files: [], globs: [] }, guardrails: {}, acceptance: { steps: [] } };
+    let section = "";
+    let sub = "";
+    for (let raw of lines) {
+        const l = raw.replace(/\t/g, "    ");
+        if (/^\s*#/.test(l) || /^\s*$/.test(l)) continue;
+        const sec = l.match(/^([a-zA-Z_]+):\s*$/);
+        if (sec) { section = sec[1]; sub = ""; continue; }
+        const subm = l.match(/^\s{2}([a-zA-Z_]+):\s*$/);
+        if (subm) { sub = subm[1]; continue; }
+        const item = l.match(/^\s*-\s+(.+)$/);
+        if (item) {
+            const val = item[1].replace(/^"|"$/g, "").trim();
+            if (section === "requirements") out.requirements.push(val);
+            else if (section === "acceptance" && sub === "steps") out.acceptance.steps.push(val);
+            else if (section === "targets" && sub === "files") out.targets.files.push(val);
+            else if (section === "targets" && sub === "globs") out.targets.globs.push(val);
+            else if (section === "guardrails" && /\[/.test(item[1])) {
+                // ignore inline arrays here (we'll parse key: [..] on key line)
+            }
+            continue;
+        }
+        const kv = l.match(/^\s{0,2}([a-zA-Z_]+):\s*(.+)$/);
+        if (kv) {
+            const k = kv[1];
+            const vraw = kv[2].trim();
+            const v = vraw.replace(/^"|"$/g, "");
+            if (section === "meta") out.meta[k] = v;
+            else if (section === "guardrails") {
+                if (/^\[.*\]$/.test(vraw)) {
+                    const arr = vraw.replace(/^\[|\]$/g, "").split(",").map(s => s.replace(/^\s*"|"\s*$/g, "").trim()).filter(Boolean);
+                    out.guardrails[k] = arr;
+                } else if (/^(true|false)$/i.test(v)) out.guardrails[k] = String(v).toLowerCase() === "true";
+                else if (/^\d+$/.test(v)) out.guardrails[k] = parseInt(v, 10);
+                else out.guardrails[k] = v;
+            }
+        }
+    }
+    return out;
+}
+
+function ensureOpenSpecScaffold(cwd, aiDir) {
+    const target = resolve(aiDir, "openspec");
+    if (!existsSync(target)) fs.ensureDirSync(target);
+    const tplRoot = resolve(__dirname, "..", "templates", ".ai-tools-chain", "openspec");
+    const files = ["spec.yaml", "schema.yaml"];
+    for (const f of files) {
+        const src = resolve(tplRoot, f);
+        const dst = resolve(target, f);
+        if (!existsSync(dst) && existsSync(src)) fs.copyFileSync(src, dst);
+    }
+}
+
+async function autoArchiveOldTasks(aiDir) {
+    // pack logs for tasks older than 7 days if status done/redo
+    const tasksDir = resolve(aiDir, "tasks");
+    if (!existsSync(tasksDir)) return;
+    const now = Date.now();
+    const entries = fs.readdirSync(tasksDir).filter(n => !n.startsWith("."));
+    for (const id of entries) {
+        const td = resolve(tasksDir, id);
+        const metaPath = resolve(td, "meta.json");
+        if (!existsSync(metaPath)) continue;
+        try {
+            const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+            const created = Date.parse(meta.created_at || new Date().toISOString());
+            const ageDays = (now - created) / (1000 * 60 * 60 * 24);
+            if (ageDays < 7) continue;
+            if (!['done','redo'].includes(String(meta.status || '').toLowerCase())) continue;
+
+            const archiveDir = resolve(aiDir, "archives");
+            fs.ensureDirSync(archiveDir);
+            const archiveName = `${id}.tar.gz`;
+            const archiveAbs = resolve(archiveDir, archiveName);
+
+            // prepare a temp folder with logs
+            const temp = resolve(td, ".to-archive");
+            fs.ensureDirSync(temp);
+            const moveIfExists = (p) => { if (existsSync(p)) fs.copyFileSync(p, resolve(temp, path.basename(p))); };
+            // Known log-like files
+            for (const f of fs.readdirSync(td)) {
+                if (f.startsWith("eval-") && f.endsWith(".log")) fs.copyFileSync(resolve(td, f), resolve(temp, f));
+            }
+            moveIfExists(resolve(td, "transcript.jsonl"));
+            // provider/second-opinion logs already elsewhere; keep as-is
+
+            // tar it
+            if (fs.readdirSync(temp).length > 0) {
+                await execa("tar", ["-czf", archiveAbs, "-C", temp, "."]);
+                // cleanup logs copied
+                for (const f of fs.readdirSync(temp)) {
+                    const src = resolve(td, f);
+                    if (existsSync(src)) fs.removeSync(src);
+                }
+            }
+            fs.removeSync(temp);
+        } catch { /* ignore */ }
+    }
+}
+
 // ---------- version ----------
 program.command("version")
     .description("show version")
@@ -196,6 +301,13 @@ program.command("doctor")
             try { await execa("python3", ["--version"]); } catch { await execa("python", ["--version"]); }
         }));
         results.push(await check("npx available", async () => { await execa("npx", ["--version"]); }));
+
+        results.push(await check("openspec present", async () => {
+            const cwd = process.cwd();
+            const aiDir = resolve(cwd, ".ai-tools-chain");
+            const spec = resolve(aiDir, "openspec", "spec.yaml");
+            if (!existsSync(spec)) throw new Error("缺少 .ai-tools-chain/openspec/spec.yaml（可执行 ai-tools spec:scaffold）");
+        }));
 
         spinner.stop();
         for (const r of results) {
@@ -240,12 +352,95 @@ program.command("init")
             console.log("  - .ai-tools-chain/config/toolchain.conf");
             console.log("  - .ai-tools-chain/config/eval.conf");
             console.log("  - .ai-tools-chain/config/plugins.conf");
+            console.log("  - .ai-tools-chain/openspec/spec.yaml");
+            console.log("  - .ai-tools-chain/openspec/schema.yaml");
+            console.log("  - .ai-tools-chain/promptfoo/promptfooconfig.yaml");
             console.log("  - .vscode/tasks.json");
         } catch (e) {
             spinner.fail("复制失败。");
             console.error(e);
             process.exit(1);
         }
+    });
+
+// ---------- spec (OpenSpec) ----------
+program.command("spec:scaffold")
+    .description("scaffold .ai-tools-chain/openspec/spec.yaml & schema.yaml")
+    .action(async () => {
+        const cwd = process.cwd();
+        const aiDir = ensureProjectInited(cwd);
+        ensureOpenSpecScaffold(cwd, aiDir);
+        console.log(chalk.green("已生成/补全 openspec 模板：.ai-tools-chain/openspec/"));
+    });
+
+program.command("spec:lint")
+    .description("lint openspec/spec.yaml with minimal checks")
+    .action(async () => {
+        const cwd = process.cwd();
+        const aiDir = ensureProjectInited(cwd);
+        const specPath = resolve(aiDir, "openspec", "spec.yaml");
+        if (!existsSync(specPath)) { console.log(chalk.red("缺少 openspec/spec.yaml，请先执行 spec:scaffold")); process.exit(1); }
+        const spec = parseOpenSpecYAML(readFileSync(specPath, "utf-8"));
+        const errs = [];
+        if (!spec?.meta?.id) errs.push("缺少 meta.id");
+        if (!spec?.meta?.title) errs.push("缺少 meta.title");
+        if (!((spec?.targets?.files||[]).length || (spec?.targets?.globs||[]).length)) errs.push("缺少 targets.files 或 targets.globs");
+        if (errs.length) {
+            console.log(chalk.red("OpenSpec 校验失败："));
+            errs.forEach(e => console.log(" - " + e));
+            process.exit(1);
+        }
+        console.log(chalk.green("OpenSpec 校验通过。"));
+    });
+
+program.command("spec:plan")
+    .description("generate plan.md for the last task from OpenSpec")
+    .action(async () => {
+        const cwd = process.cwd();
+        const aiDir = ensureProjectInited(cwd);
+        const lastFile = resolve(aiDir, ".last_task");
+        if (!existsSync(lastFile)) { console.log(chalk.red("未找到任务，请先运行 ai-tools repl 创建任务。")); process.exit(1); }
+        const taskId = readFileSync(lastFile, "utf-8").trim();
+        const tasksDir = resolve(aiDir, "tasks");
+        const metaPath = resolve(tasksDir, taskId, "meta.json");
+        if (!existsSync(metaPath)) { console.log(chalk.red("任务元数据不存在，请在 REPL 内创建任务。")); process.exit(1); }
+        ensureOpenSpecScaffold(cwd, aiDir);
+        const specPath = resolve(aiDir, "openspec", "spec.yaml");
+        const specText = readFileSync(specPath, "utf-8");
+        const spec = parseOpenSpecYAML(specText);
+        if (!spec?.meta?.id || !spec?.meta?.title || (!spec?.targets?.files?.length && !spec?.targets?.globs?.length)) {
+            console.log(chalk.red("OpenSpec 不完整：至少需要 meta.id/meta.title 与 targets(files/globs)。"));
+            process.exit(1);
+        }
+        // snapshot
+        const snapDir = resolve(tasksDir, taskId, "openspec");
+        fs.ensureDirSync(snapDir);
+        writeFileSync(resolve(snapDir, "spec.yaml"), specText, "utf-8");
+
+        // plan
+        const planFile = resolve(tasksDir, taskId, "plan.md");
+        const out = [];
+        out.push(`# Task ${taskId} - 计划`);
+        out.push("");
+        out.push("## 将改动的文件（草案）");
+        const files = (spec.targets.files || []);
+        if (files.length) for (const f of files) out.push(`- ${f}`); else out.push("- （待补充）");
+        out.push("");
+        out.push("## 要点");
+        out.push(`- 目标：${spec.meta.title || "(未填)"}`);
+        out.push(`- 需求条目：${(spec.requirements||[]).length} 项`);
+        out.push(`- 风险：${spec.meta.risk || "(未定)"}`);
+        out.push("");
+        out.push("## 验收标准（来自 OpenSpec）");
+        for (const s of (spec.acceptance?.steps || [])) out.push(`- ${s}`);
+        writeFileSync(planFile, out.join("\n"), "utf-8");
+
+        const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+        meta.status = "plan";
+        meta.guardrails = spec.guardrails || {};
+        meta.acceptance = spec.acceptance || {};
+        writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+        console.log(chalk.green(`已生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
     });
 
 // ---------- repl ----------
@@ -260,6 +455,7 @@ program.command("repl")
         const tasksDir = resolve(aiDir, "tasks");
 
         fs.ensureDirSync(tasksDir);
+        await autoArchiveOldTasks(aiDir);
 
         // 询问是否恢复上次任务
         const lastFile = resolve(aiDir, ".last_task");
@@ -306,16 +502,53 @@ program.command("repl")
                     return;
                 }
                 if (cmd === "/plan") {
-                    const planFile = resolve(tasksDir, taskId, "plan.md");
-                    if (!existsSync(planFile)) {
-                        const template = `# Task ${taskId} - 计划\n\n## 将改动的文件（草案）\n- （待补充）\n\n## 要点\n- 目标：\n- 范围：\n- 风险：\n`;
-                        writeFileSync(planFile, template, "utf-8");
+                    // 强制从 OpenSpec 生成 plan
+                    ensureOpenSpecScaffold(cwd, aiDir);
+                    const specPath = resolve(aiDir, "openspec", "spec.yaml");
+                    if (!existsSync(specPath)) {
+                        console.log(chalk.red("未找到 openspec/spec.yaml，请先运行 ai-tools spec:scaffold 并编辑后重试。"));
+                        rl.prompt();
+                        return;
                     }
-                    // 更新 meta
+                    const specText = readFileSync(specPath, "utf-8");
+                    const spec = parseOpenSpecYAML(specText);
+                    if (!spec?.meta?.id || !spec?.meta?.title || (!spec?.targets?.files?.length && !spec?.targets?.globs?.length)) {
+                        console.log(chalk.red("OpenSpec 不完整：至少需要 meta.id/meta.title 与 targets(files/globs)。"));
+                        rl.prompt();
+                        return;
+                    }
+                    // 快照当前 spec 到 task 目录
+                    const snapDir = resolve(tasksDir, taskId, "openspec");
+                    fs.ensureDirSync(snapDir);
+                    writeFileSync(resolve(snapDir, "spec.yaml"), specText, "utf-8");
+
+                    // 生成 plan.md
+                    const planFile = resolve(tasksDir, taskId, "plan.md");
+                    const out = [];
+                    out.push(`# Task ${taskId} - 计划`);
+                    out.push("");
+                    out.push("## 将改动的文件（草案）");
+                    const files = (spec.targets.files || []);
+                    if (files.length) for (const f of files) out.push(`- ${f}`);
+                    else out.push("- （待补充）");
+                    out.push("");
+                    out.push("## 要点");
+                    out.push(`- 目标：${spec.meta.title || "(未填)"}`);
+                    out.push(`- 需求条目：${(spec.requirements||[]).length} 项`);
+                    out.push(`- 风险：${spec.meta.risk || "(未定)"}`);
+                    out.push("");
+                    out.push("## 验收标准（来自 OpenSpec）");
+                    for (const s of (spec.acceptance?.steps || [])) out.push(`- ${s}`);
+                    writeFileSync(planFile, out.join("\n"), "utf-8");
+
+                    // 写回 meta：状态 + 护栏 + 验收
                     const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
                     meta.status = "plan";
+                    meta.guardrails = spec.guardrails || {};
+                    meta.acceptance = spec.acceptance || {};
                     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-                    console.log(chalk.cyan(`已生成/更新 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
+
+                    console.log(chalk.cyan(`已从 OpenSpec 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
                     rl.prompt();
                     return;
                 }
@@ -482,6 +715,24 @@ program.command("repl")
                         return;
                     }
                     if (cmd === "/accept") {
+                        // Gate: 评测必须通过，或允许 override
+                        try {
+                            const report = JSON.parse(readFileSync(resolve(tasksDir, taskId, "eval-report.json"), "utf-8"));
+                            const failed = (report?.results || []).some(r => r.status === "failed");
+                            const allowOverride = String(cfg?.eval?.allow_gate_override || "false").toLowerCase() === "true";
+                            const phrase = (cfg?.confirm?.override_phrase || "确认合入").trim();
+                            if (failed) {
+                                if (!allowOverride) {
+                                    console.log(chalk.red("评测 gate 未通过，已阻断提交。可修复后重试。"));
+                                    rl.prompt();
+                                    return;
+                                } else {
+                                    const ans = await promptLine(chalk.yellow(`评测失败。输入强确认短语“${phrase}”以继续提交，或回车取消 > `));
+                                    if (ans !== phrase) { console.log(chalk.yellow("已取消提交。")); rl.prompt(); return; }
+                                }
+                            }
+                        } catch { /* 无报告则不阻断 */ }
+
                         // 强确认提交 codegen 结果
                         const sum = await promptLine(chalk.cyan("请输入本次提交摘要（留空则使用默认）> "));
                         const msg = `feat(atc): codegen for task ${taskId}` + (sum ? ` – ${sum}` : "");
@@ -492,6 +743,7 @@ program.command("repl")
                             meta.status = "done";
                             writeFileSync(metaPath, JSON.stringify(meta, null, 2));
                             console.log(chalk.green("✅ 已提交 codegen 结果。"));
+                            await autoArchiveOldTasks(aiDir);
                         } catch (e) {
                             console.log(chalk.red("提交失败："), e.message);
                         }
@@ -579,6 +831,7 @@ program.command("repl")
                             console.log(chalk.green("\n评测全部通过。"));
                         }
                         console.log(chalk.gray(`报告：.ai-tools-chain/tasks/${taskId}/eval-report.json`));
+                        await autoArchiveOldTasks(aiDir);
                         rl.prompt();
                         return;
                     }

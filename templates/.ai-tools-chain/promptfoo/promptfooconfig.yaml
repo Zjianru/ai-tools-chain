@@ -1,0 +1,15 @@
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      apiKeyEnvar: OPENAI_API_KEY
+
+prompts:
+  - "请根据以下需求为函数写单元测试：{{requirement}}"
+
+tests:
+  - vars:
+      requirement: "对 /api/sum 的错误处理写单测"
+    assert:
+      - type: javascript
+        value: "output && output.length > 0"
+

@@ -1,0 +1,18 @@
+type: object
+required: [meta, requirements, targets]
+properties:
+  meta:
+    type: object
+    required: [id, title]
+    properties:
+      id: { type: string }
+      title: { type: string }
+      owner: { type: string }
+      risk: { type: string, enum: [low, medium, high, critical] }
+  requirements:
+    type: array
+  targets:
+    type: object
+    properties:
+      files: { type: array, items: { type: string } }
+      globs: { type: array, items: { type: string } }
