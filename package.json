@@ -1,0 +1,34 @@
+{
+  "name": "ai-tools-chain",
+  "version": "0.0.1",
+  "description": "AI Tools Chain - local-first CLI for task-driven codegen & eval",
+  "type": "module",
+  "bin": {
+    "ai-tools": "./bin/ai-tools.mjs",
+    "aitc": "./bin/ai-tools.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "scripts": {
+    "dev": "node bin/ai-tools.mjs --help",
+    "version": "node -e \"console.log(require('./package.json').version)\""
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "codegen",
+    "eval",
+    "local-first"
+  ],
+  "author": "",
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.2",
+    "execa": "^9.6.0",
+    "fs-extra": "^11.3.2",
+    "ini": "^6.0.0",
+    "ora": "^9.0.0"
+  }
+}
