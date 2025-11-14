@@ -11,7 +11,6 @@ import readline from "readline";
 import ini from "ini";
 import { runCodegen, runReview, runSecondOpinion } from "../src/providers/index.mjs";
 import { invokeRole, loadModelsConfig } from "../src/models/broker.mjs";
-import path from "path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -177,64 +176,8 @@ function appendJSONL(file, obj) {
 }
 
 // -------- OpenSpec helpers (minimal YAML-ish parser) --------
-function parseOpenSpecYAML(text) {
-    // very small parser for our expected fields only
-    const lines = text.split(/\r?\n/);
-    const out = { meta: {}, requirements: [], targets: { files: [], globs: [] }, guardrails: {}, acceptance: { steps: [] } };
-    let section = "";
-    let sub = "";
-    for (let raw of lines) {
-        const l = raw.replace(/\t/g, "    ");
-        if (/^\s*#/.test(l) || /^\s*$/.test(l)) continue;
-        const sec = l.match(/^([a-zA-Z_]+):\s*$/);
-        if (sec) { section = sec[1]; sub = ""; continue; }
-        const subm = l.match(/^\s{2}([a-zA-Z_]+):\s*$/);
-        if (subm) { sub = subm[1]; continue; }
-        const item = l.match(/^\s*-\s+(.+)$/);
-        if (item) {
-            const val = item[1].replace(/^"|"$/g, "").trim();
-            if (section === "requirements") out.requirements.push(val);
-            else if (section === "acceptance" && sub === "steps") out.acceptance.steps.push(val);
-            else if (section === "targets" && sub === "files") out.targets.files.push(val);
-            else if (section === "targets" && sub === "globs") out.targets.globs.push(val);
-            else if (section === "guardrails" && /\[/.test(item[1])) {
-                // ignore inline arrays here (we'll parse key: [..] on key line)
-            }
-            continue;
-        }
-        const kv = l.match(/^\s{0,2}([a-zA-Z_]+):\s*(.+)$/);
-        if (kv) {
-            const k = kv[1];
-            const vraw = kv[2].trim();
-            const v = vraw.replace(/^"|"$/g, "");
-            if (section === "meta") out.meta[k] = v;
-            else if (section === "guardrails") {
-                if (/^\[.*\]$/.test(vraw)) {
-                    const arr = vraw.replace(/^\[|\]$/g, "").split(",").map(s => s.replace(/^\s*"|"\s*$/g, "").trim()).filter(Boolean);
-                    out.guardrails[k] = arr;
-                } else if (/^(true|false)$/i.test(v)) out.guardrails[k] = String(v).toLowerCase() === "true";
-                else if (/^\d+$/.test(v)) out.guardrails[k] = parseInt(v, 10);
-                else out.guardrails[k] = v;
-            }
-        }
-    }
-    return out;
-}
-
-function ensureOpenSpecScaffold(cwd, aiDir) {
-    const target = resolve(aiDir, "openspec");
-    if (!existsSync(target)) fs.ensureDirSync(target);
-    const tplRoot = resolve(__dirname, "..", "templates", ".ai-tools-chain", "openspec");
-    const files = ["spec.yaml", "schema.yaml"];
-    for (const f of files) {
-        const src = resolve(tplRoot, f);
-        const dst = resolve(target, f);
-        if (!existsSync(dst) && existsSync(src)) fs.copyFileSync(src, dst);
-    }
-}
-
 async function autoArchiveOldTasks(aiDir) {
-    // pack logs for tasks older than 7 days if status done/redo
+    // pack logs/ for tasks older than 7 days if status done/redo
     const tasksDir = resolve(aiDir, "tasks");
     if (!existsSync(tasksDir)) return;
     const now = Date.now();
@@ -249,33 +192,17 @@ async function autoArchiveOldTasks(aiDir) {
             const ageDays = (now - created) / (1000 * 60 * 60 * 24);
             if (ageDays < 7) continue;
             if (!['done','redo'].includes(String(meta.status || '').toLowerCase())) continue;
+            const logsDir = resolve(td, "logs");
+            if (!existsSync(logsDir)) continue;
+            if (!fs.readdirSync(logsDir).length) continue;
 
             const archiveDir = resolve(aiDir, "archives");
             fs.ensureDirSync(archiveDir);
             const archiveName = `${id}.tar.gz`;
             const archiveAbs = resolve(archiveDir, archiveName);
 
-            // prepare a temp folder with logs
-            const temp = resolve(td, ".to-archive");
-            fs.ensureDirSync(temp);
-            const moveIfExists = (p) => { if (existsSync(p)) fs.copyFileSync(p, resolve(temp, path.basename(p))); };
-            // Known log-like files
-            for (const f of fs.readdirSync(td)) {
-                if (f.startsWith("eval-") && f.endsWith(".log")) fs.copyFileSync(resolve(td, f), resolve(temp, f));
-            }
-            moveIfExists(resolve(td, "transcript.jsonl"));
-            // provider/second-opinion logs already elsewhere; keep as-is
-
-            // tar it
-            if (fs.readdirSync(temp).length > 0) {
-                await execa("tar", ["-czf", archiveAbs, "-C", temp, "."]);
-                // cleanup logs copied
-                for (const f of fs.readdirSync(temp)) {
-                    const src = resolve(td, f);
-                    if (existsSync(src)) fs.removeSync(src);
-                }
-            }
-            fs.removeSync(temp);
+            await execa("tar", ["-czf", archiveAbs, "-C", logsDir, "."]);
+            fs.removeSync(logsDir);
         } catch { /* ignore */ }
     }
 }
@@ -301,13 +228,6 @@ program.command("doctor")
             try { await execa("python3", ["--version"]); } catch { await execa("python", ["--version"]); }
         }));
         results.push(await check("npx available", async () => { await execa("npx", ["--version"]); }));
-
-        results.push(await check("openspec present", async () => {
-            const cwd = process.cwd();
-            const aiDir = resolve(cwd, ".ai-tools-chain");
-            const spec = resolve(aiDir, "openspec", "spec.yaml");
-            if (!existsSync(spec)) throw new Error("缺少 .ai-tools-chain/openspec/spec.yaml（可执行 ai-tools spec:scaffold）");
-        }));
 
         spinner.stop();
         for (const r of results) {
@@ -363,86 +283,6 @@ program.command("init")
         }
     });
 
-// ---------- spec (OpenSpec) ----------
-program.command("spec:scaffold")
-    .description("scaffold .ai-tools-chain/openspec/spec.yaml & schema.yaml")
-    .action(async () => {
-        const cwd = process.cwd();
-        const aiDir = ensureProjectInited(cwd);
-        ensureOpenSpecScaffold(cwd, aiDir);
-        console.log(chalk.green("已生成/补全 openspec 模板：.ai-tools-chain/openspec/"));
-    });
-
-program.command("spec:lint")
-    .description("lint openspec/spec.yaml with minimal checks")
-    .action(async () => {
-        const cwd = process.cwd();
-        const aiDir = ensureProjectInited(cwd);
-        const specPath = resolve(aiDir, "openspec", "spec.yaml");
-        if (!existsSync(specPath)) { console.log(chalk.red("缺少 openspec/spec.yaml，请先执行 spec:scaffold")); process.exit(1); }
-        const spec = parseOpenSpecYAML(readFileSync(specPath, "utf-8"));
-        const errs = [];
-        if (!spec?.meta?.id) errs.push("缺少 meta.id");
-        if (!spec?.meta?.title) errs.push("缺少 meta.title");
-        if (!((spec?.targets?.files||[]).length || (spec?.targets?.globs||[]).length)) errs.push("缺少 targets.files 或 targets.globs");
-        if (errs.length) {
-            console.log(chalk.red("OpenSpec 校验失败："));
-            errs.forEach(e => console.log(" - " + e));
-            process.exit(1);
-        }
-        console.log(chalk.green("OpenSpec 校验通过。"));
-    });
-
-program.command("spec:plan")
-    .description("generate plan.md for the last task from OpenSpec")
-    .action(async () => {
-        const cwd = process.cwd();
-        const aiDir = ensureProjectInited(cwd);
-        const lastFile = resolve(aiDir, ".last_task");
-        if (!existsSync(lastFile)) { console.log(chalk.red("未找到任务，请先运行 ai-tools repl 创建任务。")); process.exit(1); }
-        const taskId = readFileSync(lastFile, "utf-8").trim();
-        const tasksDir = resolve(aiDir, "tasks");
-        const metaPath = resolve(tasksDir, taskId, "meta.json");
-        if (!existsSync(metaPath)) { console.log(chalk.red("任务元数据不存在，请在 REPL 内创建任务。")); process.exit(1); }
-        ensureOpenSpecScaffold(cwd, aiDir);
-        const specPath = resolve(aiDir, "openspec", "spec.yaml");
-        const specText = readFileSync(specPath, "utf-8");
-        const spec = parseOpenSpecYAML(specText);
-        if (!spec?.meta?.id || !spec?.meta?.title || (!spec?.targets?.files?.length && !spec?.targets?.globs?.length)) {
-            console.log(chalk.red("OpenSpec 不完整：至少需要 meta.id/meta.title 与 targets(files/globs)。"));
-            process.exit(1);
-        }
-        // snapshot
-        const snapDir = resolve(tasksDir, taskId, "openspec");
-        fs.ensureDirSync(snapDir);
-        writeFileSync(resolve(snapDir, "spec.yaml"), specText, "utf-8");
-
-        // plan
-        const planFile = resolve(tasksDir, taskId, "plan.md");
-        const out = [];
-        out.push(`# Task ${taskId} - 计划`);
-        out.push("");
-        out.push("## 将改动的文件（草案）");
-        const files = (spec.targets.files || []);
-        if (files.length) for (const f of files) out.push(`- ${f}`); else out.push("- （待补充）");
-        out.push("");
-        out.push("## 要点");
-        out.push(`- 目标：${spec.meta.title || "(未填)"}`);
-        out.push(`- 需求条目：${(spec.requirements||[]).length} 项`);
-        out.push(`- 风险：${spec.meta.risk || "(未定)"}`);
-        out.push("");
-        out.push("## 验收标准（来自 OpenSpec）");
-        for (const s of (spec.acceptance?.steps || [])) out.push(`- ${s}`);
-        writeFileSync(planFile, out.join("\n"), "utf-8");
-
-        const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-        meta.status = "plan";
-        meta.guardrails = spec.guardrails || {};
-        meta.acceptance = spec.acceptance || {};
-        writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-        console.log(chalk.green(`已生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
-    });
-
 // ---------- repl ----------
 program.command("repl")
     .description("start a local REPL and log to .ai-tools-chain/tasks/<taskid>/transcript.jsonl")
@@ -489,6 +329,10 @@ program.command("repl")
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: "> " });
         rl.prompt();
 
+        const ask = (question) => new Promise((resolveAns) => {
+            rl.question(question, (ans) => resolveAns(String(ans || "").trim()));
+        });
+
         rl.on("line", async (lineRaw) => {
             const line = lineRaw.trim();
             if (!line) { rl.prompt(); return; }
@@ -502,53 +346,145 @@ program.command("repl")
                     return;
                 }
                 if (cmd === "/plan") {
-                    // 强制从 OpenSpec 生成 plan
-                    ensureOpenSpecScaffold(cwd, aiDir);
-                    const specPath = resolve(aiDir, "openspec", "spec.yaml");
-                    if (!existsSync(specPath)) {
-                        console.log(chalk.red("未找到 openspec/spec.yaml，请先运行 ai-tools spec:scaffold 并编辑后重试。"));
-                        rl.prompt();
-                        return;
-                    }
-                    const specText = readFileSync(specPath, "utf-8");
-                    const spec = parseOpenSpecYAML(specText);
-                    if (!spec?.meta?.id || !spec?.meta?.title || (!spec?.targets?.files?.length && !spec?.targets?.globs?.length)) {
-                        console.log(chalk.red("OpenSpec 不完整：至少需要 meta.id/meta.title 与 targets(files/globs)。"));
-                        rl.prompt();
-                        return;
-                    }
-                    // 快照当前 spec 到 task 目录
-                    const snapDir = resolve(tasksDir, taskId, "openspec");
-                    fs.ensureDirSync(snapDir);
-                    writeFileSync(resolve(snapDir, "spec.yaml"), specText, "utf-8");
+                    // 规划阶段：代替用户与官方 openspec 对话
+                    const rest = lineRaw.slice(cmd.length).trim();
+                    const logsDir = resolve(tasksDir, taskId, "logs", "openspec");
+                    fs.ensureDirSync(logsDir);
 
-                    // 生成 plan.md
-                    const planFile = resolve(tasksDir, taskId, "plan.md");
-                    const out = [];
-                    out.push(`# Task ${taskId} - 计划`);
-                    out.push("");
-                    out.push("## 将改动的文件（草案）");
-                    const files = (spec.targets.files || []);
-                    if (files.length) for (const f of files) out.push(`- ${f}`);
-                    else out.push("- （待补充）");
-                    out.push("");
-                    out.push("## 要点");
-                    out.push(`- 目标：${spec.meta.title || "(未填)"}`);
-                    out.push(`- 需求条目：${(spec.requirements||[]).length} 项`);
-                    out.push(`- 风险：${spec.meta.risk || "(未定)"}`);
-                    out.push("");
-                    out.push("## 验收标准（来自 OpenSpec）");
-                    for (const s of (spec.acceptance?.steps || [])) out.push(`- ${s}`);
-                    writeFileSync(planFile, out.join("\n"), "utf-8");
+                    const changeId = `task-${taskId}`;
+                    const changeDir = resolve("openspec", "changes", changeId);
+                    fs.ensureDirSync(changeDir);
 
-                    // 写回 meta：状态 + 护栏 + 验收
+                    const title = rest || await ask(chalk.cyan("本轮任务的标题/目标是？ > "));
+                    const why = await ask(chalk.cyan("为什么要做这件事（Why）？ > "));
+                    const what = await ask(chalk.cyan("大致打算做哪些改动（What Changes）？ > "));
+                    const req = await ask(chalk.cyan("关键需求/要点（Requirements，逗号分隔）？ > "));
+                    const targets = await ask(chalk.cyan("主要涉及哪些文件或模块（Targets，逗号分隔）？ > "));
+                    const risks = await ask(chalk.cyan("主要风险与缓解方式（Risks & Mitigations）？ > "));
+                    const accept = await ask(chalk.cyan("验收标准（Acceptance，逗号分隔）？ > "));
+
+                    const changeMd = [
+                        "---",
+                        `id: ${changeId}`,
+                        `title: ${title || `Task ${taskId}`}`,
+                        "owner: @you",
+                        "risk: medium",
+                        "---",
+                        "",
+                        "## Why",
+                        why || "(待补充)",
+                        "",
+                        "## What Changes",
+                        what || "(待补充)",
+                        "",
+                        "## Requirements",
+                        req ? req.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)",
+                        "",
+                        "## Targets",
+                        targets ? targets.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)",
+                        "",
+                        "## Risks and Mitigations",
+                        risks || "(待补充)",
+                        "",
+                        "## Acceptance",
+                        accept ? accept.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)",
+                        ""
+                    ].join("\n");
+
+                    const changePath = resolve(changeDir, "change.md");
+                    writeFileSync(changePath, changeMd, "utf-8");
+
+                    // minimal proposal.md to satisfy openspec show
+                    const proposalPath = resolve(changeDir, "proposal.md");
+                    if (!existsSync(proposalPath)) {
+                        const proposal = [
+                            `# Proposal for ${changeId}`,
+                            "",
+                            "This proposal was generated by AI Tools Chain.",
+                            "See change.md for detailed Why/What/Requirements/Targets/Risks/Acceptance.",
+                            ""
+                        ].join("\n");
+                        writeFileSync(proposalPath, proposal, "utf-8");
+                    }
+
+                    // minimal specs/ tree with one delta to satisfy openspec validate
+                    const specsDir = resolve(changeDir, "specs", "task");
+                    fs.ensureDirSync(specsDir);
+                    const reqList = req.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+                    const primaryReq = reqList[0] || title || `Task ${taskId}`;
+                    const specMd = [
+                        "## ADDED Requirements",
+                        "",
+                        `### Requirement: ${primaryReq}`,
+                        "",
+                        // 官方 openspec 要求：
+                        // - ADDED requirement 需要正文
+                        // - 正文应包含 SHALL/MUST 等约束词
+                        // 这里统一生成一句英文占位，保证通过严格校验。
+                        `The system SHALL: ${primaryReq || "satisfy this autogenerated requirement."}`,
+                        "",
+                        "#### Scenario: basic usage",
+                        "- This scenario was generated by AI Tools Chain.",
+                        "- See change.md for full context and details.",
+                        ""
+                    ].join("\n");
+                    writeFileSync(resolve(specsDir, "spec.md"), specMd, "utf-8");
+
+                    // minimal tasks.md
+                    const tasksPath = resolve(changeDir, "tasks.md");
+                    if (!existsSync(tasksPath)) {
+                        const tasksMd = [
+                            "# Tasks",
+                            "",
+                            "1. Implement the changes described in change.md.",
+                            "2. Add or update tests to cover requirements and scenarios.",
+                            "3. Run the evaluation pipeline and ensure it passes.",
+                            ""
+                        ].join("\n");
+                        writeFileSync(tasksPath, tasksMd, "utf-8");
+                    }
+
+                    // 调用 openspec 校验与导出
+                    try {
+                        const { stdout: vout, stderr: verr } = await execa("openspec", ["validate", "--changes", "--json", "--no-interactive"], { cwd });
+                        writeFileSync(resolve(logsDir, "validate.json"), vout || "{}", "utf-8");
+                        if (verr) writeFileSync(resolve(logsDir, "validate.log"), verr, "utf-8");
+                    } catch (e) {
+                        const msg = e?.stdout || e?.stderr || e?.message || String(e);
+                        writeFileSync(resolve(logsDir, "validate.error.log"), String(msg), "utf-8");
+                        console.log(chalk.red("openspec validate 失败："), chalk.gray(String(msg).slice(0, 400)));
+                    }
+
+                    // plan.md（人类可读）
+                    try {
+                        const { stdout } = await execa("openspec", ["show", "--type", "change", changeId], { cwd });
+                        const planFile = resolve(tasksDir, taskId, "plan.md");
+                        writeFileSync(planFile, stdout || "", "utf-8");
+                        writeFileSync(resolve(logsDir, "show.md.log"), stdout || "", "utf-8");
+                    } catch (e) {
+                        const msg = e?.stdout || e?.stderr || e?.message || String(e);
+                        writeFileSync(resolve(logsDir, "show-md.error.log"), String(msg), "utf-8");
+                        console.log(chalk.red("openspec show (markdown) 失败："), chalk.gray(String(msg).slice(0, 400)));
+                    }
+
+                    // plan.openspec.json（如果支持 JSON 输出）
+                    try {
+                        const { stdout } = await execa("openspec", ["show", "--json", "--type", "change", changeId], { cwd });
+                        const jsonPath = resolve(tasksDir, taskId, "plan.openspec.json");
+                        writeFileSync(jsonPath, stdout || "{}", "utf-8");
+                        writeFileSync(resolve(logsDir, "show.json.log"), stdout || "", "utf-8");
+                    } catch (e) {
+                        const msg = e?.stdout || e?.stderr || e?.message || String(e);
+                        writeFileSync(resolve(logsDir, "show-json.error.log"), String(msg), "utf-8");
+                        // JSON 输出失败不阻断整体流程
+                    }
+
+                    // 更新 meta 状态
                     const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
                     meta.status = "plan";
-                    meta.guardrails = spec.guardrails || {};
-                    meta.acceptance = spec.acceptance || {};
                     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
-                    console.log(chalk.cyan(`已从 OpenSpec 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
+                    console.log(chalk.cyan(`已根据 openspec change 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
                     rl.prompt();
                     return;
                 }
@@ -565,7 +501,7 @@ program.command("repl")
 
                     // 2) 强确认（当前阶段：仅本地词典命中 + 再次确认短语）
                     //    如果 meta.status 不是 pending_confirm，也要求再次确认
-                    const ans = await promptLine(chalk.yellow(`将要生成代码并写入工作区。请输入中文强确认短语“确认生成”继续，或回车取消 > `));
+                    const ans = await ask(chalk.yellow(`将要生成代码并写入工作区。请输入中文强确认短语“确认生成”继续，或回车取消 > `));
                     if (ans !== "确认生成") {
                         console.log(chalk.yellow("已取消 codegen。"));
                         rl.prompt();
@@ -586,8 +522,8 @@ program.command("repl")
                         // 分支名：{type}/{slug}-task-{id}
                         const defType = "feat";
                         const defSlug = "task";
-                        const type = await promptLine(chalk.cyan(`分支类型（默认 ${defType}）> `)) || defType;
-                        const slug = await promptLine(chalk.cyan(`分支 slug（默认 ${defSlug}）> `)) || defSlug;
+                        const type = await ask(chalk.cyan(`分支类型（默认 ${defType}）> `)) || defType;
+                        const slug = await ask(chalk.cyan(`分支 slug（默认 ${defSlug}）> `)) || defSlug;
                         const pattern = (cfgTask.branch_pattern || "{type}/{slug}-task-{id}")
                             .replaceAll("{type}", type)
                             .replaceAll("{slug}", slug)
@@ -727,14 +663,14 @@ program.command("repl")
                                     rl.prompt();
                                     return;
                                 } else {
-                                    const ans = await promptLine(chalk.yellow(`评测失败。输入强确认短语“${phrase}”以继续提交，或回车取消 > `));
+                                    const ans = await ask(chalk.yellow(`评测失败。输入强确认短语“${phrase}”以继续提交，或回车取消 > `));
                                     if (ans !== phrase) { console.log(chalk.yellow("已取消提交。")); rl.prompt(); return; }
                                 }
                             }
                         } catch { /* 无报告则不阻断 */ }
 
                         // 强确认提交 codegen 结果
-                        const sum = await promptLine(chalk.cyan("请输入本次提交摘要（留空则使用默认）> "));
+                        const sum = await ask(chalk.cyan("请输入本次提交摘要（留空则使用默认）> "));
                         const msg = `feat(atc): codegen for task ${taskId}` + (sum ? ` – ${sum}` : "");
                         try {
                             await execa("git", ["add", "-A"], { cwd });
@@ -753,7 +689,7 @@ program.command("repl")
 
                     if (cmd === "/revert") {
                         // 回滚到 pre-commit 快照：删除新建文件 & 恢复修改
-                        const ok = await promptLine(chalk.yellow("将回滚本次 codegen 改动。输入 YES 确认 > "));
+                        const ok = await ask(chalk.yellow("将回滚本次 codegen 改动。输入 YES 确认 > "));
                         if (ok !== "YES") { console.log(chalk.yellow("已取消。")); rl.prompt(); return; }
 
                         const items = readPatchItems(tasksDir, taskId);
@@ -782,7 +718,7 @@ program.command("repl")
 
 
                     if (cmd === "/eval") {
-                        const ok = await promptLine(chalk.yellow("将按 eval.conf 执行评测。输入 “开始评测” 继续，或回车取消 > "));
+                        const ok = await ask(chalk.yellow("将按 eval.conf 执行评测。输入 “开始评测” 继续，或回车取消 > "));
                         if (ok !== "开始评测") { console.log(chalk.yellow("已取消评测。")); rl.prompt(); return; }
 
                         const evalConfPath = resolve(aiDir, "config", "eval.conf");
