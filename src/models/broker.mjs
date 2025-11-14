@@ -5,8 +5,14 @@ import path from "path";
 import { anthropicAdapter } from "./adapters/anthropic.mjs";
 import { openaiAdapter } from "./adapters/openai.mjs";
 import { copilotAdapter } from "./adapters/gh_copilot.mjs";
+import { deepseekAdapter } from "./adapters/deepseek.mjs";
 
-const registry = { anthropic: anthropicAdapter, openai: openaiAdapter, gh_copilot: copilotAdapter };
+const registry = {
+    anthropic: anthropicAdapter,
+    openai: openaiAdapter,
+    gh_copilot: copilotAdapter,
+    deepseek: deepseekAdapter
+};
 
 export function loadModelsConfig(aiDir) {
     const file = path.resolve(aiDir, "config", "models.conf");
