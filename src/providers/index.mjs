@@ -17,12 +17,16 @@ export function loadProviderConfig(aiDir) {
 
 export async function runCodegen({ aiDir, planText, repoSummary }) {
     const cfg = loadProviderConfig(aiDir).codegen;
-    if ((cfg.provider || "").toLowerCase() === "anthropic") {
+    const provider = (cfg.provider || "anthropic").toLowerCase();
+    if (provider === "anthropic") {
         return await codegenWithClaude({
-            planText, repoSummary, model: cfg.model, apiKey: process.env[cfg.api_key_env || ""]
+            planText,
+            repoSummary,
+            model: cfg.model || "claude-3-5-sonnet",
+            apiKey: process.env[cfg.api_key_env || "ANTHROPIC_API_KEY"]
         });
     }
-    throw new Error("未支持的 codegen provider");
+    throw new Error(`未支持的 codegen provider: ${provider || "(empty)"}`);
 }
 
 export async function runReview({ aiDir, diffText }) {
