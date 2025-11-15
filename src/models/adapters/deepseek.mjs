@@ -227,6 +227,64 @@ export const deepseekAdapter = {
             return { ok: true, files };
         }
 
+        if (role === "plan_review") {
+            const planning = payload.planningText || "";
+            const planMd = payload.planText || "";
+            const issues = Array.isArray(payload.issues) ? payload.issues : [];
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "plan_review",
+                "你是规划审查专家，请根据规划 JSON、plan.md 与初步问题列表，给出更精细的规划审查意见和下一步建议。严格输出 JSON。"
+            );
+            const systemMsg = {
+                role: "system",
+                content: systemContent
+            };
+            const issuesText = issues
+                .map((i) => {
+                    if (!i) return "";
+                    if (typeof i === "string") return i;
+                    return `[${i.severity || "info"}] (${i.type || "planning"}) ${i.message || ""}`;
+                })
+                .filter(Boolean)
+                .join("\n");
+            const userMsg = {
+                role: "user",
+                content: [
+                    "下面是本次规划的 JSON 与 plan.md 片段，以及结构/openspec 层发现的问题列表。",
+                    "",
+                    "[PLANNING.JSON]",
+                    planning.slice(0, 4000),
+                    "",
+                    "[PLAN.MD]",
+                    planMd.slice(0, 4000),
+                    "",
+                    "[ISSUES]",
+                    issuesText || "(无)"
+                ].join("\n")
+            };
+
+            const { data, content } = await callDeepseekChat({
+                apiKey,
+                model,
+                messages: [systemMsg, userMsg],
+                extra: {}
+            });
+
+            try {
+                const text = extractJson(content || "");
+                const parsed = JSON.parse(text);
+                return {
+                    ok: true,
+                    review: parsed,
+                    usage: data?.usage || null,
+                    raw: data
+                };
+            } catch {
+                return { ok: false, error: "plan_review_json_parse_failed" };
+            }
+        }
+
         if (role === "planning") {
             const brief = payload.userBrief || "";
             const repoSummary = payload.repoSummary || "";

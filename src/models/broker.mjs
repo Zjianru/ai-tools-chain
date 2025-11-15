@@ -27,7 +27,7 @@ export function loadModelsConfig(aiDir) {
     const profileRoot = conf.profile || {};
     for (const name of Object.keys(profileRoot)) {
         const roleRoot = profileRoot[name] || {};
-        const roles = { codegen: [], review: [], second_opinion: [], planning: [] };
+        const roles = { codegen: [], review: [], second_opinion: [], planning: [], plan_review: [] };
         for (const role of Object.keys(roles)) {
             const stepsObj = roleRoot[role] || {};
             for (const orderKey of Object.keys(stepsObj)) {

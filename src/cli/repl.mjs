@@ -63,7 +63,9 @@ export async function runRepl(cwd) {
     console.log(chalk.green(`\nREPL 已启动。Task: ${taskId}`));
     console.log(chalk.gray(`日志：.ai-tools-chain/tasks/${taskId}/transcript.jsonl`));
     console.log(
-        chalk.gray("命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /quit")
+        chalk.gray(
+            "命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /status  /quit"
+        )
     );
 
     const tlog = resolve(tasksDir, taskId, "transcript.jsonl");
@@ -193,12 +195,22 @@ export async function runRepl(cwd) {
                         }
                     }
 
-                    // 规划完成后自动触发一次规划审查（PlanReviewAgent）
+                    // 规划完成后自动触发一次规划审查（PlanReviewAgent）与规划会议纪要（PlanningMeetingAgent）
                     if (plannedByAI) {
                         try {
                             const planReviewAgent = new PlanReviewAgent();
                             const reviewResult = await planReviewAgent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                             (reviewResult.logs || []).forEach((ln) => console.log(ln));
+                            if (reviewResult.statePatch) {
+                                applyStatePatch(tasksDir, taskId, reviewResult.statePatch);
+                            }
+                            const { PlanningMeetingAgent } = await import("../agents/planningMeetingAgent.mjs");
+                            const meetingAgent = new PlanningMeetingAgent();
+                            const meetingResult = await meetingAgent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
+                            (meetingResult.logs || []).forEach((ln) => console.log(ln));
+                            if (meetingResult.statePatch) {
+                                applyStatePatch(tasksDir, taskId, meetingResult.statePatch);
+                            }
                         } catch (e) {
                             console.log(chalk.yellow("规划已生成，但自动规划审查失败："), e.message || e);
                         }
@@ -206,6 +218,18 @@ export async function runRepl(cwd) {
                 } catch (e) {
                     console.log(chalk.yellow("AI 规划失败，回退到手动问答："), e.message || e);
                     await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
+                }
+                rl.prompt();
+                return;
+            }
+
+            if (cmd === "/status") {
+                try {
+                    const state = loadTaskState(tasksDir, taskId);
+                    console.log(chalk.cyan("\n当前任务状态（state.json）："));
+                    console.log(JSON.stringify(state, null, 2));
+                } catch (e) {
+                    console.log(chalk.red("读取 task 状态失败："), e.message || e);
                 }
                 rl.prompt();
                 return;
