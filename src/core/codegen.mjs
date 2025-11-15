@@ -25,6 +25,25 @@ function sha256(buf) {
     return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
+function isLikelyXml(text) {
+    const t = (text || "").trim();
+    if (!t) return false;
+    if (t.startsWith("<?xml")) return true;
+    if (t.startsWith("<project") || t.startsWith("<dependencies")) return true;
+    const angleCount = (t.match(/</g) || []).length;
+    const braceCount = (t.match(/[{}]/g) || []).length;
+    return angleCount > 10 && angleCount > braceCount * 2;
+}
+
+function isLikelyJava(text) {
+    const t = (text || "").trim();
+    if (!t) return false;
+    if (/package\s+[a-zA-Z0-9_.]+;/.test(t)) return true;
+    if (/public\s+class\s+[A-Z][A-Za-z0-9_]*/.test(t)) return true;
+    if (/import\s+org\.springframework\./.test(t)) return true;
+    return false;
+}
+
 export async function runCodegenCore({
     cwd,
     aiDir,
@@ -75,12 +94,24 @@ export async function runCodegenCore({
     const proposals = Array.isArray(codegenResult.files) ? codegenResult.files : [];
 
     const changes = [];
+    const irFiles = [];
     for (const p of proposals) {
         if (!p?.path) continue;
         const abs = resolve(cwd, p.path);
         fs.ensureDirSync(dirname(abs));
         const isNew = !existsSync(abs);
         const content = p.content ?? "";
+
+        // 简单的语言/内容一致性检查，避免将 pom.xml 之类内容写入 .java 文件
+        const lowerPath = p.path.toLowerCase();
+        if (lowerPath.endsWith(".java")) {
+            if (isLikelyXml(content) && !isLikelyJava(content)) {
+                throw new Error(
+                    `codegen 生成的 ${p.path} 内容看起来是 XML 而非 Java，请调整规划或提示后重试。`
+                );
+            }
+        }
+
         writeFileSync(abs, content, "utf-8");
         const buf = Buffer.from(content, "utf-8");
         changes.push({
@@ -88,6 +119,23 @@ export async function runCodegenCore({
             op: isNew ? "create" : "modify",
             size: buf.length,
             hash: sha256(buf)
+        });
+
+        // 生成最小 IR 条目，供后续 Agent/编排使用
+        const lower = p.path.toLowerCase();
+        let language = "text";
+        if (lower.endsWith(".java")) language = "java";
+        else if (lower.endsWith(".kt")) language = "kotlin";
+        else if (lower.endsWith(".xml")) language = "xml";
+        else if (lower.endsWith(".yml") || lower.endsWith(".yaml")) language = "yaml";
+        else if (lower.endsWith(".json")) language = "json";
+        else if (lower.endsWith(".md")) language = "markdown";
+
+        irFiles.push({
+            path: p.path,
+            op: isNew ? "create" : "modify",
+            language,
+            intent: p.intent || p.rationale || ""
         });
     }
 
@@ -99,6 +147,14 @@ export async function runCodegenCore({
         const txt = readFileSync(srcAbs, "utf-8");
         writeFileSync(dstAbs, txt, "utf-8");
     }
+
+    // 写出 codegen IR 文件，描述本次生成/修改的文件级意图
+    const ir = {
+        taskId,
+        generated_at: nowISO(),
+        files: irFiles
+    };
+    writeFileSync(resolve(taskDir, "codegen.ir.json"), JSON.stringify(ir, null, 2), "utf-8");
 
     const patchJson = { taskId, generated_at: nowISO(), items: changes };
     writeFileSync(resolve(taskDir, "patch.json"), JSON.stringify(patchJson, null, 2), "utf-8");

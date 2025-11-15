@@ -114,10 +114,6 @@ export function ensureGitignoreHasToolDirs(cwd) {
         return s === t;
     });
     let changed = false;
-    if (!hasEntry(".vscode")) {
-        lines.push(".vscode");
-        changed = true;
-    }
     if (!hasEntry(".ai-tools-chain")) {
         lines.push(".ai-tools-chain");
         changed = true;
