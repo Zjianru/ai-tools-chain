@@ -133,6 +133,7 @@ export async function runRepl(cwd) {
 
                     let roundCount = 0;
                     const maxRounds = 5;
+                    let plannedByAI = false;
                     while (roundCount < maxRounds) {
                         const result = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                         (result.logs || []).forEach((ln) => console.log(ln));
@@ -156,7 +157,9 @@ export async function runRepl(cwd) {
                                 console.log(chalk.yellow("已达到本轮澄清上限，将基于当前草案生成规划（如可能）。"));
                                 const finalResult = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                                 (finalResult.logs || []).forEach((ln) => console.log(ln));
-                                if (!finalResult.logs && !finalResult.questions) {
+                                if (finalResult.logs && finalResult.logs.length) {
+                                    plannedByAI = true;
+                                } else if (!finalResult.logs && !finalResult.questions) {
                                     console.log(chalk.gray("AI 未能在澄清上限内给出完整规划，可考虑改用手动规划。"));
                                 }
                                 break;
@@ -169,7 +172,21 @@ export async function runRepl(cwd) {
                                 console.log(chalk.yellow("AI 规划未返回结果，将回退到手动问答流程。"));
                                 await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
                             }
+                            if (result.logs && result.logs.length) {
+                                plannedByAI = true;
+                            }
                             break;
+                        }
+                    }
+
+                    // 规划完成后自动触发一次规划审查（PlanReviewAgent）
+                    if (plannedByAI) {
+                        try {
+                            const planReviewAgent = new PlanReviewAgent();
+                            const reviewResult = await planReviewAgent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
+                            (reviewResult.logs || []).forEach((ln) => console.log(ln));
+                        } catch (e) {
+                            console.log(chalk.yellow("规划已生成，但自动规划审查失败："), e.message || e);
                         }
                     }
                 } catch (e) {
