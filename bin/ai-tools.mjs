@@ -142,7 +142,7 @@ program.command("init")
         }
 
         if (!opts.yes) {
-            console.log(chalk.cyan("将在当前项目创建 `.ai-tools-chain/` 与 `.vscode/tasks.json`。"));
+            console.log(chalk.cyan("将在当前项目创建 `.ai-tools-chain/` 目录。"));
             console.log(chalk.cyan("仅复制模板，不会修改你的业务代码。继续请输入: yes"));
             const ans = await promptLine("> ");
             if (ans.toLowerCase() !== "yes") {
@@ -164,7 +164,6 @@ program.command("init")
             console.log("  - .ai-tools-chain/openspec/spec.yaml");
             console.log("  - .ai-tools-chain/openspec/schema.yaml");
             console.log("  - .ai-tools-chain/promptfoo/promptfooconfig.yaml");
-            console.log("  - .vscode/tasks.json");
             console.log("  - .gitignore（追加 .vscode / .ai-tools-chain）");
         } catch (e) {
             spinner.fail("复制失败。");

@@ -1,6 +1,6 @@
 import fs from "fs-extra";
 import { readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { resolve, dirname } from "path";
 import { execa } from "execa";
 import chalk from "chalk";
 import { invokeRole } from "../models/broker.mjs";
@@ -153,22 +153,76 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
         console.log(chalk.red("openspec show (markdown) 失败："), chalk.gray(String(msg).slice(0, 400)));
     }
 
-    try {
-        const { stdout } = await execa("openspec", ["show", "--json", "--type", "change", changeId], { cwd: openspecRoot });
-        const jsonPath = resolve(tasksDir, taskId, "plan.openspec.json");
-        writeFileSync(jsonPath, stdout || "{}", "utf-8");
-        writeFileSync(resolve(logsDir, "show.json.log"), stdout || "", "utf-8");
-    } catch (e) {
-        const msg = e?.stdout || e?.stderr || e?.message || String(e);
-        writeFileSync(resolve(logsDir, "show-json.error.log"), String(msg), "utf-8");
-    }
-
     const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
     meta.status = "plan";
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 }
 
-export async function callPlanningOnce({ cwd, aiDir, tasksDir, taskId, userBrief, history = [], round = 1 }) {
+export function ensurePlanningDraft({ tasksDir, taskId }) {
+    const taskDir = resolve(tasksDir, taskId);
+    fs.ensureDirSync(taskDir);
+    const draftPath = resolve(taskDir, "planning.draft.json");
+    if (!existsSync(draftPath)) {
+        const draft = {
+            schema_version: 1,
+            meta: {},
+            why: "",
+            what: "",
+            requirements: [],
+            targets: [],
+            risks: [],
+            acceptance: [],
+            draft_files: [],
+            tasks: [],
+            notes: ""
+        };
+        writeFileSync(draftPath, JSON.stringify(draft, null, 2), "utf-8");
+        return draft;
+    }
+    try {
+        const raw = readFileSync(draftPath, "utf-8");
+        return JSON.parse(raw);
+    } catch {
+        // 若解析失败，以空草案重建，避免阻断后续流程
+        const draft = {
+            schema_version: 1,
+            meta: {},
+            why: "",
+            what: "",
+            requirements: [],
+            targets: [],
+            risks: [],
+            acceptance: [],
+            draft_files: [],
+            tasks: [],
+            notes: ""
+        };
+        try {
+            writeFileSync(draftPath, JSON.stringify(draft, null, 2), "utf-8");
+        } catch {
+            // best-effort
+        }
+        return draft;
+    }
+}
+
+export function writePlanningDraft({ tasksDir, taskId, planning }) {
+    const taskDir = resolve(tasksDir, taskId);
+    fs.ensureDirSync(taskDir);
+    const draftPath = resolve(taskDir, "planning.draft.json");
+    writeFileSync(draftPath, JSON.stringify(planning, null, 2), "utf-8");
+}
+
+export async function callPlanningOnce({
+    cwd,
+    aiDir,
+    tasksDir,
+    taskId,
+    userBrief,
+    history = [],
+    round = 1,
+    draft = null
+}) {
     const taskDir = resolve(tasksDir, taskId);
     fs.ensureDirSync(taskDir);
 
@@ -181,7 +235,11 @@ export async function callPlanningOnce({ cwd, aiDir, tasksDir, taskId, userBrief
         repoSummary = "";
     }
 
-    const planningRes = await invokeRole("planning", { userBrief, repoSummary, history }, { aiDir, cwd });
+    const planningRes = await invokeRole(
+        "planning",
+        { userBrief, repoSummary, history, draft },
+        { aiDir, cwd }
+    );
     if (!planningRes?.ok) {
         throw new Error(planningRes?.error || "planning 调用失败");
     }

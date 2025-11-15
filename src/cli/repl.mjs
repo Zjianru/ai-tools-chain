@@ -92,6 +92,12 @@ export async function runRepl(cwd) {
         console.log(chalk.cyan(`已根据 openspec change 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
     }
 
+    function appendPlanningJSONL(tasksDir, taskId, obj) {
+        const p = resolve(tasksDir, taskId, "planning.transcript.jsonl");
+        fs.ensureDirSync(dirname(p));
+        appendFileSync(p, JSON.stringify(obj) + "\n", "utf-8");
+    }
+
     rl.on("line", async (lineRaw) => {
         if (askResolver) {
             const resolver = askResolver;
@@ -117,18 +123,53 @@ export async function runRepl(cwd) {
                 const brief = rest || await ask(chalk.cyan("用一两句话描述这次你想完成的改动（回车结束） > "));
                 try {
                     const agent = new PlanningAgent();
-                    const result = await agent.step(
-                        { cwd, aiDir, tasksDir, taskId, metaPath },
-                        { from: "user", content: brief }
-                    );
-                    (result.logs || []).forEach((ln) => console.log(ln));
-                    if (result.questions && result.questions.length) {
-                        console.log(chalk.yellow("AI 认为信息不足，目前多轮澄清尚未在 REPL 内实现，将暂时回退到手动问答流程。"));
-                        await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
-                    }
-                    if (!result.logs && !result.questions) {
-                        console.log(chalk.yellow("AI 规划未返回结果，将回退到手动问答流程。"));
-                        await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
+                    appendPlanningJSONL(tasksDir, taskId, {
+                        ts: nowISO(),
+                        role: "user",
+                        kind: "brief",
+                        text: brief
+                    });
+
+                    let roundCount = 0;
+                    const maxRounds = 5;
+                    while (roundCount < maxRounds) {
+                        const result = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
+                        (result.logs || []).forEach((ln) => console.log(ln));
+
+                        if (result.questions && result.questions.length) {
+                            const round = result.round || (roundCount + 1);
+                            for (let i = 0; i < result.questions.length; i += 1) {
+                                const q = result.questions[i];
+                                const ans = await ask(chalk.cyan(`${q} > `));
+                                appendPlanningJSONL(tasksDir, taskId, {
+                                    ts: nowISO(),
+                                    role: "user",
+                                    kind: "clarify_answer",
+                                    round,
+                                    index: i + 1,
+                                    text: ans
+                                });
+                            }
+                            roundCount += 1;
+                            if (roundCount >= maxRounds) {
+                                console.log(chalk.yellow("已达到本轮澄清上限，将基于当前草案生成规划（如可能）。"));
+                                const finalResult = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
+                                (finalResult.logs || []).forEach((ln) => console.log(ln));
+                                if (!finalResult.logs && !finalResult.questions) {
+                                    console.log(chalk.gray("AI 未能在澄清上限内给出完整规划，可考虑改用手动规划。"));
+                                }
+                                break;
+                            }
+                            continue;
+                        }
+
+                        if (!result.questions) {
+                            if (!result.logs || !result.logs.length) {
+                                console.log(chalk.yellow("AI 规划未返回结果，将回退到手动问答流程。"));
+                                await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
+                            }
+                            break;
+                        }
                     }
                 } catch (e) {
                     console.log(chalk.yellow("AI 规划失败，回退到手动问答："), e.message || e);
