@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { execa } from "execa";
-import { runReview, runSecondOpinion } from "../providers/index.mjs";
+import { invokeRole } from "../models/broker.mjs";
 
 function pathIsUnder(p, base) {
     return p === base || p.startsWith(base);
@@ -33,13 +33,78 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         }
     }
 
+    // 补充：从 patch.json 中读取新增文件，计入摘要
+    try {
+        const patchPath = resolve(tasksDir, taskId, "patch.json");
+        if (fs.existsSync(patchPath)) {
+            const { items = [] } = JSON.parse(readFileSync(patchPath, "utf-8"));
+            const creates = items.filter((it) => it.op === "create");
+            for (const it of creates) {
+                const already = files.find((f) => f.path === it.path);
+                if (already) continue;
+                const abs = resolve(cwd, it.path);
+                let text = "";
+                try {
+                    text = readFileSync(abs, "utf-8");
+                } catch {
+                    text = "";
+                }
+                const lineCount = text ? text.split(/\r?\n/).length : 0;
+                added += lineCount;
+                files.push({ path: it.path, added: lineCount, deleted: 0 });
+            }
+        }
+    } catch {
+        // 若 patch.json 解析失败，忽略新增文件摘要
+    }
+
     const dangerList = (cfg?.task?.dangerous_paths || "").split(",").map((s) => s.trim()).filter(Boolean);
     const filesWithDanger = files.map((f) => ({
         ...f,
         danger: inDanger(f.path, dangerList)
     }));
 
-    const { stdout: diffText } = await execa("git", ["--no-pager", "diff"], { cwd });
+    // 合成完整 diff：git diff（针对修改） + 对新增文件的伪 diff
+    let diffText = "";
+    try {
+        const { stdout } = await execa("git", ["--no-pager", "diff"], { cwd });
+        diffText = stdout || "";
+    } catch {
+        diffText = "";
+    }
+
+    let extraDiffs = "";
+    try {
+        const patchPath = resolve(tasksDir, taskId, "patch.json");
+        if (fs.existsSync(patchPath)) {
+            const { items = [] } = JSON.parse(readFileSync(patchPath, "utf-8"));
+            const creates = items.filter((it) => it.op === "create");
+            for (const it of creates) {
+                const abs = resolve(cwd, it.path);
+                let text = "";
+                try {
+                    text = readFileSync(abs, "utf-8");
+                } catch {
+                    text = "";
+                }
+                const linesNew = text ? text.split(/\r?\n/) : [];
+                extraDiffs += `\ndiff --git a/${it.path} b/${it.path}\n`;
+                extraDiffs += "new file mode 100644\n";
+                extraDiffs += "--- /dev/null\n";
+                extraDiffs += `+++ b/${it.path}\n`;
+                extraDiffs += `@@ -0,0 +1,${linesNew.length} @@\n`;
+                for (const ln of linesNew) {
+                    extraDiffs += `+${ln}\n`;
+                }
+            }
+        }
+    } catch {
+        // best-effort
+    }
+
+    if (extraDiffs) {
+        diffText = `${diffText}\n${extraDiffs}`;
+    }
 
     const planFile = resolve(tasksDir, taskId, "plan.md");
     let planText = "";
@@ -49,8 +114,21 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         planText = "";
     }
 
-    const so = await runSecondOpinion({ aiDir, cwd, planText, diffText });
-    const rv = await runReview({ aiDir, diffText });
+    // 使用 models/broker，根据 models.conf 决定 second_opinion / review 的 provider
+    let so = { ok: false, notes: "" };
+    let rv = { ok: false, summary: "未配置 review provider", risks: [], suggestions: [] };
+    try {
+        const soRes = await invokeRole("second_opinion", { planText, diffText }, { aiDir, cwd });
+        if (soRes?.ok) so = soRes;
+    } catch {
+        // ignore, 保持默认
+    }
+    try {
+        const rvRes = await invokeRole("review", { diffText }, { aiDir, cwd });
+        if (rvRes?.ok) rv = rvRes;
+    } catch {
+        // ignore, 保持默认
+    }
 
     const soDir = resolve(aiDir, "second-opinion", taskId);
     fs.ensureDirSync(soDir);

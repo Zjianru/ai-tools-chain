@@ -22,20 +22,22 @@ export function loadModelsConfig(aiDir) {
     const active = (conf.models?.active_profile || "default").trim();
     const profiles = {};
 
-    // 从所有 section 提取 profile.<name>.<role>.<n>
-    for (const section of Object.keys(conf)) {
-        const m = section.match(/^profile\.([^\.]+)\.(codegen|review|second_opinion)\.(\d+)$/);
-        if (!m) continue;
-        const [, name, role, order] = m;
-        const step = { order: Number(order), ...conf[section] };
-        profiles[name] ||= { roles: { codegen: [], review: [], second_opinion: [] } };
-        profiles[name].roles[role].push(step);
-    }
-    // 按序号排序
-    for (const name of Object.keys(profiles)) {
-        for (const role of Object.keys(profiles[name].roles)) {
-            profiles[name].roles[role].sort((a, b) => a.order - b.order);
+    // 解析 profile.<name>.<role>.<序号>，ini 会把它们展开为：
+    // conf.profile[name][role][order] = { provider, model, api_key_env, ... }
+    const profileRoot = conf.profile || {};
+    for (const name of Object.keys(profileRoot)) {
+        const roleRoot = profileRoot[name] || {};
+        const roles = { codegen: [], review: [], second_opinion: [], planning: [] };
+        for (const role of Object.keys(roles)) {
+            const stepsObj = roleRoot[role] || {};
+            for (const orderKey of Object.keys(stepsObj)) {
+                const stepConf = stepsObj[orderKey] || {};
+                const order = Number(orderKey) || 0;
+                roles[role].push({ order, ...stepConf });
+            }
+            roles[role].sort((a, b) => a.order - b.order);
         }
+        profiles[name] = { roles };
     }
 
     // prompts（可选）

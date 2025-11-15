@@ -3,8 +3,8 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { execa } from "execa";
 import crypto from "crypto";
-import { runCodegen } from "../providers/index.mjs";
 import { nowISO } from "./task.mjs";
+import { invokeRole } from "../models/broker.mjs";
 
 async function runGit(cwd, args) {
     const { stdout } = await execa("git", args, { cwd });
@@ -50,42 +50,43 @@ export async function runCodegenCore({
     const planText = planTextOverride ?? (existsSync(planFile) ? readFileSync(planFile, "utf-8") : "# (空计划)");
     const repoSummary = repoSummaryOverride ?? "(可选) 这里可以用 git ls-files + 目录树生成概览";
 
-    const proposals = await runCodegen({ aiDir, planText, repoSummary });
-    const targets = proposals.map((p) => p.path);
-
-    const changes = [];
-    for (const rel of targets) {
-        const abs = resolve(cwd, rel);
-        fs.ensureDirSync(dirname(abs));
-        const isNew = !existsSync(abs);
-        const text = [
-            "# AI Tools Chain",
-            `# Task: ${taskId}`,
-            `# File: ${rel}`,
-            "",
-            "// 这是一段示例内容（占位），用于验证 codegen 流程。",
-            "// 之后这里会由模型生成真实业务代码。",
-            ""
-        ].join("\n");
-        writeFileSync(abs, text, "utf-8");
-        const buf = Buffer.from(text, "utf-8");
-        changes.push({
-            path: rel,
-            op: isNew ? "create" : "modify",
-            size: buf.length,
-            hash: sha256(buf)
-        });
+    // 若存在 plan.files.json，则优先使用其中的文件列表作为目标文件
+    let filesFromPlan = [];
+    const filesJsonPath = resolve(taskDir, "plan.files.json");
+    if (existsSync(filesJsonPath)) {
+        try {
+            const parsed = JSON.parse(readFileSync(filesJsonPath, "utf-8"));
+            if (Array.isArray(parsed.files)) filesFromPlan = parsed.files;
+        } catch {
+            // ignore parse errors, fallback to planText
+        }
     }
 
+    // 通过 models/broker 调用当前 profile 下的 codegen 链
+    const codegenResult = await invokeRole(
+        "codegen",
+        { planText, repoSummary, files: filesFromPlan },
+        { aiDir, cwd }
+    );
+    if (!codegenResult?.ok) {
+        throw new Error(codegenResult?.error || "codegen 调用失败");
+    }
+    const proposals = Array.isArray(codegenResult.files) ? codegenResult.files : [];
+
+    const changes = [];
     for (const p of proposals) {
+        if (!p?.path) continue;
         const abs = resolve(cwd, p.path);
         fs.ensureDirSync(dirname(abs));
         const isNew = !existsSync(abs);
-        writeFileSync(abs, p.content, "utf-8");
+        const content = p.content ?? "";
+        writeFileSync(abs, content, "utf-8");
+        const buf = Buffer.from(content, "utf-8");
         changes.push({
             path: p.path,
             op: isNew ? "create" : "modify",
-            size: Buffer.byteLength(p.content)
+            size: buf.length,
+            hash: sha256(buf)
         });
     }
 
@@ -104,21 +105,59 @@ export async function runCodegenCore({
     meta.status = "review";
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
-    const { stdout: numstat } = await execa("git", ["--no-pager", "diff", "--numstat"], { cwd });
-    const lines = numstat.trim() ? numstat.trim().split("\n") : [];
+    // 汇总变更摘要：
+    // - 对于新建文件（create），按文件内容行数统计新增行；
+    // - 对于修改文件（modify），使用 git diff --numstat 统计增删行；
+    const files = [];
     let added = 0;
     let deleted = 0;
-    const files = [];
-    for (const ln of lines) {
-        const m = ln.match(/^(\d+|\-)\s+(\d+|\-)\s+(.+)$/);
-        if (m) {
-            const a = m[1] === "-" ? 0 : parseInt(m[1], 10);
-            const d = m[2] === "-" ? 0 : parseInt(m[2], 10);
-            const f = m[3];
-            added += a;
-            deleted += d;
-            files.push({ path: f, added: a, deleted: d });
+
+    const newFiles = changes.filter((c) => c.op === "create");
+    for (const nf of newFiles) {
+        const abs = resolve(cwd, nf.path);
+        let text = "";
+        try {
+            text = readFileSync(abs, "utf-8");
+        } catch {
+            text = "";
         }
+        const lineCount = text ? text.split(/\r?\n/).length : 0;
+        added += lineCount;
+        files.push({ path: nf.path, added: lineCount, deleted: 0 });
+    }
+
+    const modifiedFiles = changes.filter((c) => c.op === "modify");
+    if (modifiedFiles.length) {
+        try {
+            const args = ["--no-pager", "diff", "--numstat", "--", ...modifiedFiles.map((m) => m.path)];
+            const { stdout: numstat } = await execa("git", args, { cwd });
+            const lines = numstat.trim() ? numstat.trim().split("\n") : [];
+            const diffByPath = new Map();
+            for (const ln of lines) {
+                const m = ln.match(/^(\d+|\-)\s+(\d+|\-)\s+(.+)$/);
+                if (!m) continue;
+                const a = m[1] === "-" ? 0 : parseInt(m[1], 10);
+                const d = m[2] === "-" ? 0 : parseInt(m[2], 10);
+                const p = m[3];
+                diffByPath.set(p, { added: a, deleted: d });
+                added += a;
+                deleted += d;
+            }
+            for (const mf of modifiedFiles) {
+                const diff = diffByPath.get(mf.path) || { added: 0, deleted: 0 };
+                files.push({ path: mf.path, added: diff.added, deleted: diff.deleted });
+            }
+        } catch {
+            // 若 git diff 失败，不影响文件本身和 patch.json，只是摘要缺少行级统计
+            for (const mf of modifiedFiles) {
+                files.push({ path: mf.path, added: 0, deleted: 0 });
+            }
+        }
+    }
+
+    const deletedFilesEntries = changes.filter((c) => c.op === "delete");
+    for (const df of deletedFilesEntries) {
+        files.push({ path: df.path, added: 0, deleted: 0 });
     }
 
     return {
