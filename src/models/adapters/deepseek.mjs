@@ -1,4 +1,7 @@
 // DeepSeek adapter - OpenAI-style chat completions
+import fs from "fs";
+import path from "path";
+
 const DEFAULT_BASE_URL = "https://api.deepseek.com/chat/completions";
 
 async function callDeepseekChat({ apiKey, model, messages, extra }) {
@@ -41,8 +44,27 @@ async function callDeepseekChat({ apiKey, model, messages, extra }) {
     return { data, content };
 }
 
+function loadProjectPrompt(aiDir, key, fallback) {
+    try {
+        if (!aiDir) return fallback;
+        const base = path.resolve(aiDir, "prompts");
+        const candidates = [
+            path.resolve(base, `${key}.system.md`),
+            path.resolve(base, `${key}.md`)
+        ];
+        for (const p of candidates) {
+            if (fs.existsSync(p)) {
+                return fs.readFileSync(p, "utf-8");
+            }
+        }
+    } catch {
+        // ignore
+    }
+    return fallback;
+}
+
 export const deepseekAdapter = {
-    async invoke(role, payload, { step }) {
+    async invoke(role, payload, { step, aiDir }) {
         const apiKeyEnv = step.apiKeyEnv || step.api_key_env || "DEEPSEEK_API_KEY";
         const apiKey = process.env[apiKeyEnv];
         const model = step.model || "deepseek-chat";
@@ -50,9 +72,14 @@ export const deepseekAdapter = {
         // 根据角色构造不同的系统提示和用户内容
         if (role === "review") {
             const diff = payload.diffText || "";
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "review",
+                "你是一个资深代码审查助手，请阅读 diff 并给出风险与建议。"
+            );
             const systemMsg = {
                 role: "system",
-                content: "你是一个资深代码审查助手，请阅读 diff 并给出风险与建议。"
+                content: systemContent
             };
             const userMsg = {
                 role: "user",
@@ -75,9 +102,14 @@ export const deepseekAdapter = {
         if (role === "second_opinion") {
             const plan = payload.planText || "";
             const diff = payload.diffText || "";
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "second_opinion",
+                "你是一个第二视角审查者，请从整体方案和 diff 的角度给出审查意见。"
+            );
             const systemMsg = {
                 role: "system",
-                content: "你是一个第二视角审查者，请从整体方案和 diff 的角度给出审查意见。"
+                content: systemContent
             };
             const userMsg = {
                 role: "user",
@@ -109,9 +141,10 @@ export const deepseekAdapter = {
                 };
             }
 
-            const systemMsg = {
-                role: "system",
-                content: [
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "codegen",
+                [
                     "你是代码生成助手，请根据规划为每个目标文件生成合理的代码实现。",
                     "",
                     "严格输出一个 JSON 对象，结构为：",
@@ -131,6 +164,10 @@ export const deepseekAdapter = {
                     "- 禁止输出 Markdown 代码块（```）；",
                     "- 禁止输出注释说明或额外文字，只能输出 JSON。"
                 ].join("\n")
+            );
+            const systemMsg = {
+                role: "system",
+                content: systemContent
             };
             const userMsg = {
                 role: "user",
@@ -191,9 +228,10 @@ export const deepseekAdapter = {
             const repoSummary = payload.repoSummary || "";
             const history = Array.isArray(payload.history) ? payload.history : [];
 
-            const systemMsg = {
-                role: "system",
-                content: [
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "planning",
+                [
                     "你是资深软件规划助手，负责为单个开发任务产出规范、可执行的规划 JSON，用于驱动 OpenSpec 和后续 codegen/review/eval。",
                     "",
                     "严格输出一个 JSON 对象，结构为：",
@@ -231,6 +269,10 @@ export const deepseekAdapter = {
                     '  * 请设置 status = "ready"，questions 为空数组，并完整填充 planning 对象（尤其是 requirements 与 draft_files）。',
                     "- 严禁输出 Markdown 代码块标记（```）、注释或额外说明文字。仅输出 JSON。"
                 ].join("\n")
+            );
+            const systemMsg = {
+                role: "system",
+                content: systemContent
             };
 
             const historyText = history.length

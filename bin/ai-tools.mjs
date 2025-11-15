@@ -164,6 +164,7 @@ program.command("init")
             console.log("  - .ai-tools-chain/openspec/spec.yaml");
             console.log("  - .ai-tools-chain/openspec/schema.yaml");
             console.log("  - .ai-tools-chain/promptfoo/promptfooconfig.yaml");
+            console.log("  - .ai-tools-chain/prompts/*.system.md");
             console.log("  - .gitignore（ .ai-tools-chain）");
         } catch (e) {
             spinner.fail("复制失败。");

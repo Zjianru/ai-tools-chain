@@ -11,6 +11,7 @@ import { runReviewCore } from "../core/review.mjs";
 import { runEvalCore } from "../core/eval.mjs";
 import { runAcceptCore } from "../core/accept.mjs";
 import { PlanningAgent } from "../agents/planningAgent.mjs";
+import { PlanReviewAgent } from "../agents/planReviewAgent.mjs";
 
 async function promptLine(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -55,7 +56,7 @@ export async function runRepl(cwd) {
 
     console.log(chalk.green(`\nREPL 已启动。Task: ${taskId}`));
     console.log(chalk.gray(`日志：.ai-tools-chain/tasks/${taskId}/transcript.jsonl`));
-            console.log(chalk.gray("命令：/plan  /review  /codegen  /eval  /accept  /revert  /quit"));
+    console.log(chalk.gray("命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /quit"));
 
     const tlog = resolve(tasksDir, taskId, "transcript.jsonl");
 
@@ -174,6 +175,18 @@ export async function runRepl(cwd) {
                 } catch (e) {
                     console.log(chalk.yellow("AI 规划失败，回退到手动问答："), e.message || e);
                     await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
+                }
+                rl.prompt();
+                return;
+            }
+
+            if (cmd === "/planreview") {
+                try {
+                    const agent = new PlanReviewAgent();
+                    const result = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                } catch (e) {
+                    console.log(chalk.red("计划审查失败："), e.message || e);
                 }
                 rl.prompt();
                 return;
@@ -382,7 +395,7 @@ export async function runRepl(cwd) {
                 return;
             }
 
-            console.log(chalk.red("未知命令。可用：/plan /review /codegen /eval /accept /revert /quit"));
+            console.log(chalk.red("未知命令。可用：/plan /planreview /review /codegen /eval /accept /revert /quit"));
             rl.prompt();
             return;
         }
