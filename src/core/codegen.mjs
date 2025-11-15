@@ -44,6 +44,55 @@ function isLikelyJava(text) {
     return false;
 }
 
+async function generateCodegenPlan({
+    cwd,
+    aiDir,
+    tasksDir,
+    taskId,
+    planText,
+    repoSummary,
+    filesFromPlan
+}) {
+    const taskDir = resolve(tasksDir, taskId);
+    const codegenResult = await invokeRole(
+        "codegen",
+        { planText, repoSummary, files: filesFromPlan },
+        { aiDir, cwd }
+    );
+
+    try {
+        const logsDir = resolve(tasksDir, taskId, "logs", "models");
+        fs.ensureDirSync(logsDir);
+        const log = {
+            role: "codegen",
+            created_at: nowISO(),
+            files_from_plan: filesFromPlan,
+            ok: !!codegenResult?.ok,
+            error: codegenResult?.error || null
+        };
+        writeFileSync(
+            resolve(logsDir, "codegen.invoke.json"),
+            JSON.stringify(log, null, 2),
+            "utf-8"
+        );
+    } catch {
+        // logging best-effort
+    }
+
+    if (!codegenResult?.ok) {
+        throw new Error(codegenResult?.error || "codegen 调用失败");
+    }
+    const proposals = Array.isArray(codegenResult.files) ? codegenResult.files : [];
+    const plan = {
+        taskId,
+        generated_at: nowISO(),
+        files: proposals
+    };
+    const planPath = resolve(taskDir, "codegen.plan.json");
+    writeFileSync(planPath, JSON.stringify(plan, null, 2), "utf-8");
+    return proposals;
+}
+
 export async function runCodegenCore({
     cwd,
     aiDir,
@@ -57,16 +106,6 @@ export async function runCodegenCore({
 }) {
     const taskDir = resolve(tasksDir, taskId);
     const planFile = resolve(taskDir, "plan.md");
-    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-
-    await requireGitClean(cwd);
-
-    if (branchName && branchName.trim()) {
-        await execa("git", ["checkout", "-b", branchName.trim()], { cwd });
-    }
-
-    await execa("git", ["commit", "--allow-empty", "-m", `chore(atc): pre-gen snapshot for task ${taskId}`], { cwd });
-
     const planText = planTextOverride ?? (existsSync(planFile) ? readFileSync(planFile, "utf-8") : "# (空计划)");
     const repoSummary = repoSummaryOverride ?? "(可选) 这里可以用 git ls-files + 目录树生成概览";
 
@@ -78,20 +117,43 @@ export async function runCodegenCore({
             const parsed = JSON.parse(readFileSync(filesJsonPath, "utf-8"));
             if (Array.isArray(parsed.files)) filesFromPlan = parsed.files;
         } catch {
-            // ignore parse errors, fallback to planText
+            // ignore parse errors, fallback to planning.ai.json / planText
         }
     }
 
-    // 通过 models/broker 调用当前 profile 下的 codegen 链
-    const codegenResult = await invokeRole(
-        "codegen",
-        { planText, repoSummary, files: filesFromPlan },
-        { aiDir, cwd }
-    );
-    if (!codegenResult?.ok) {
-        throw new Error(codegenResult?.error || "codegen 调用失败");
+    const planPath = resolve(taskDir, "codegen.plan.json");
+    let proposals = [];
+    if (existsSync(planPath)) {
+        try {
+            const cached = JSON.parse(readFileSync(planPath, "utf-8"));
+            if (Array.isArray(cached.files)) {
+                proposals = cached.files;
+            }
+        } catch {
+            // ignore, fallback to regenerate plan
+        }
     }
-    const proposals = Array.isArray(codegenResult.files) ? codegenResult.files : [];
+    if (!proposals.length) {
+        proposals = await generateCodegenPlan({
+            cwd,
+            aiDir,
+            tasksDir,
+            taskId,
+            planText,
+            repoSummary,
+            filesFromPlan
+        });
+    }
+
+    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+
+    await requireGitClean(cwd);
+
+    if (branchName && branchName.trim()) {
+        await execa("git", ["checkout", "-b", branchName.trim()], { cwd });
+    }
+
+    await execa("git", ["commit", "--allow-empty", "-m", `chore(atc): pre-gen snapshot for task ${taskId}`], { cwd });
 
     const changes = [];
     const irFiles = [];

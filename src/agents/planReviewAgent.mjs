@@ -112,15 +112,12 @@ export class PlanReviewAgent {
                     message: "规划中未包含任何 requirements。"
                 });
             }
+
             const draftFiles = Array.isArray(planning.draft_files) ? planning.draft_files : [];
-            const acceptance = Array.isArray(planning.acceptance)
-                ? planning.acceptance
-                : planning.acceptance
-                ? [planning.acceptance]
-                : [];
+            const acceptance = Array.isArray(planning.acceptance) ? planning.acceptance : [];
 
             summary = {
-                title: planning.title || planning.meta?.title || "",
+                title: planning.meta?.title || planning.title || "",
                 why: planning.why || "",
                 what: planning.what || "",
                 requirementsCount: reqs.length,
@@ -130,7 +127,6 @@ export class PlanReviewAgent {
                 acceptanceCount: acceptance.length
             };
 
-            const draftFiles = Array.isArray(planning.draft_files) ? planning.draft_files : [];
             if (!draftFiles.length) {
                 issues.push({
                     id: "DRAFT_FILES_EMPTY",
@@ -139,11 +135,6 @@ export class PlanReviewAgent {
                     message: "规划中未提供 draft_files，codegen 将无法安全生成代码。"
                 });
             }
-            const acceptance = Array.isArray(planning.acceptance)
-                ? planning.acceptance
-                : planning.acceptance
-                ? [planning.acceptance]
-                : [];
             if (!acceptance.length) {
                 issues.push({
                     id: "ACCEPTANCE_EMPTY",

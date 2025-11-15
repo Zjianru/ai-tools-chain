@@ -273,7 +273,7 @@ export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, m
 
     const planningPath = resolve(taskDir, "planning.ai.json");
     writeFileSync(planningPath, JSON.stringify(planning, null, 2), "utf-8");
-    const title = planning.title || `Task ${taskId}`;
+    const title = planning.meta?.title || planning.title || `Task ${taskId}`;
     const why = planning.why || "";
     const what = planning.what || "";
     const requirements = Array.isArray(planning.requirements) ? planning.requirements : [];
@@ -281,11 +281,19 @@ export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, m
     const acceptance = Array.isArray(planning.acceptance) ? planning.acceptance : [];
     const risks = planning.risks || "";
 
+    const reqTexts = requirements
+        .map((r) => {
+            if (!r) return "";
+            if (typeof r === "string") return r;
+            return r.title || r.shall || "";
+        })
+        .filter((s) => s && s.trim());
+
     const inputs = {
         title,
         why,
         what,
-        req: requirements.join(","),
+        req: reqTexts.join(","),
         targets: targets.join(","),
         risks,
         accept: acceptance.join(",")
@@ -293,7 +301,11 @@ export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, m
 
     if (Array.isArray(planning.draft_files) && planning.draft_files.length) {
         const filesJsonPath = resolve(taskDir, "plan.files.json");
-        writeFileSync(filesJsonPath, JSON.stringify({ files: planning.draft_files }, null, 2), "utf-8");
+        writeFileSync(
+            filesJsonPath,
+            JSON.stringify({ files: planning.draft_files }, null, 2),
+            "utf-8"
+        );
     }
 
     await runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, metaPath, inputs, planning });

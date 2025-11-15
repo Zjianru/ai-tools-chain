@@ -5,6 +5,7 @@ import { resolve, dirname } from "path";
 import readline from "readline";
 import { execa } from "execa";
 import { readIni, loadMasks, ensureProjectInited, createNewTask, autoArchiveOldTasks, nowISO } from "../core/task.mjs";
+import { loadTaskState, applyStatePatch } from "../core/state.mjs";
 import { runPlanningWithInputs } from "../core/planning.mjs";
 import { runCodegenCore } from "../core/codegen.mjs";
 import { runReviewCore } from "../core/review.mjs";
@@ -12,6 +13,10 @@ import { runEvalCore } from "../core/eval.mjs";
 import { runAcceptCore } from "../core/accept.mjs";
 import { PlanningAgent } from "../agents/planningAgent.mjs";
 import { PlanReviewAgent } from "../agents/planReviewAgent.mjs";
+import { CodegenAgent } from "../agents/codegenAgent.mjs";
+import { CodeReviewAgent } from "../agents/codeReviewAgent.mjs";
+import { TestAgent } from "../agents/testAgent.mjs";
+import { ReviewMeetingAgent } from "../agents/reviewMeetingAgent.mjs";
 
 async function promptLine(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -53,10 +58,13 @@ export async function runRepl(cwd) {
     await autoArchiveOldTasks(aiDir);
 
     const { taskId, tasksDir, metaPath } = await ensureTaskForRepl(aiDir, cfg);
+    loadTaskState(tasksDir, taskId);
 
     console.log(chalk.green(`\nREPL 已启动。Task: ${taskId}`));
     console.log(chalk.gray(`日志：.ai-tools-chain/tasks/${taskId}/transcript.jsonl`));
-    console.log(chalk.gray("命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /quit"));
+    console.log(
+        chalk.gray("命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /quit")
+    );
 
     const tlog = resolve(tasksDir, taskId, "transcript.jsonl");
 
@@ -137,6 +145,9 @@ export async function runRepl(cwd) {
                     while (roundCount < maxRounds) {
                         const result = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                         (result.logs || []).forEach((ln) => console.log(ln));
+                        if (result.statePatch) {
+                            applyStatePatch(tasksDir, taskId, result.statePatch);
+                        }
 
                         if (result.questions && result.questions.length) {
                             const round = result.round || (roundCount + 1);
@@ -157,6 +168,9 @@ export async function runRepl(cwd) {
                                 console.log(chalk.yellow("已达到本轮澄清上限，将基于当前草案生成规划（如可能）。"));
                                 const finalResult = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                                 (finalResult.logs || []).forEach((ln) => console.log(ln));
+                                if (finalResult.statePatch) {
+                                    applyStatePatch(tasksDir, taskId, finalResult.statePatch);
+                                }
                                 if (finalResult.logs && finalResult.logs.length) {
                                     plannedByAI = true;
                                 } else if (!finalResult.logs && !finalResult.questions) {
@@ -202,6 +216,9 @@ export async function runRepl(cwd) {
                     const agent = new PlanReviewAgent();
                     const result = await agent.step({ cwd, aiDir, tasksDir, taskId, metaPath });
                     (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
+                    }
                 } catch (e) {
                     console.log(chalk.red("计划审查失败："), e.message || e);
                 }
@@ -233,7 +250,8 @@ export async function runRepl(cwd) {
                 }
 
                 try {
-                    const result = await runCodegenCore({
+                    const agent = new CodegenAgent();
+                    const result = await agent.step({
                         cwd,
                         aiDir,
                         tasksDir,
@@ -243,16 +261,10 @@ export async function runRepl(cwd) {
                         branchName,
                         repoSummaryOverride: "(可选) 这里可以用 git ls-files + 目录树生成概览"
                     });
-
-                    console.log(chalk.green("\n已生成变更，进入 review 阶段："));
-                    console.log("  - patch.json");
-                    console.log("  - files/*.full");
-                    if (result.diffSummary) {
-                        console.log(chalk.cyan("\n本次变更摘要："));
-                        console.log(`  变更文件：${result.diffSummary.filesCount} 个`);
-                        console.log(`  +${result.diffSummary.added} / -${result.diffSummary.deleted} 行`);
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
                     }
-                    console.log(chalk.gray("提示：输入 /review 查看摘要；需要回滚可手动 git reset --hard 回到快照。"));
                 } catch (e) {
                     console.log(chalk.red("codegen 失败："), e.message || e);
                 }
@@ -262,28 +274,34 @@ export async function runRepl(cwd) {
 
             if (cmd === "/review") {
                 try {
-                    const result = await runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg });
-                    console.log(chalk.cyan("\n本次变更摘要："));
-                    console.log(`  变更文件：${result.summary.filesCount} 个`);
-                    console.log(`  +${result.summary.added} / -${result.summary.deleted} 行`);
-                    if (result.files.length) {
-                        const marks = result.files.map((f) => (f.danger ? `! ${f.path}` : `  ${f.path}`));
-                        console.log(chalk.gray("  文件：\n    " + marks.join("\n    ")));
-                    } else {
-                        console.log(chalk.gray("  （当前没有可展示的 diff）"));
+                    const agent = new CodeReviewAgent();
+                    const result = await agent.step({ cwd, aiDir, tasksDir, taskId, cfg });
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
                     }
 
-                    console.log(chalk.cyan("\n第二意见摘要（Copilot/兜底）："));
-                    console.log(chalk.gray(result.secondOpinionPreview || ""));
-                    console.log(chalk.cyan("\n代码审查（OpenAI“codex”角色）摘要："));
-                    console.log(chalk.gray(result.reviewSummary || "(无)"));
-                    console.log(chalk.gray(`\nsecond opinion: ${result.secondOpinionPath}`));
-                    console.log(chalk.gray(`review JSON  : ${result.reviewPath}`));
+                    try {
+                        const meetingAgent = new ReviewMeetingAgent();
+                        const meeting = await meetingAgent.step({
+                            cwd,
+                            aiDir,
+                            tasksDir,
+                            taskId
+                        });
+                        (meeting.logs || []).forEach((ln) => console.log(ln));
+                        if (meeting.statePatch) {
+                            applyStatePatch(tasksDir, taskId, meeting.statePatch);
+                        }
+                    } catch (e) {
+                        console.log(
+                            chalk.yellow("review 已完成，但会议纪要生成失败："),
+                            e.message || e
+                        );
+                    }
                 } catch (e) {
                     console.log(chalk.red("review 失败："), e.message || e);
                 }
-
-                console.log(chalk.gray("\n下一步可：/eval （手动确认后执行评测） | /accept 提交 | /quit 退出"));
                 rl.prompt();
                 return;
             }
@@ -386,25 +404,13 @@ export async function runRepl(cwd) {
                 }
 
                 try {
-                    const result = await runEvalCore({ cwd, aiDir, tasksDir, taskId });
-                    if (!result.steps.length) {
-                        console.log(chalk.gray("未发现评测步骤。"));
-                        rl.prompt();
-                        return;
-                    }
-
-                    console.log(chalk.cyan("\n评测计划："));
-                    result.steps.forEach((s) => console.log("  - " + s.name + (s.cmd ? `: ${s.cmd}` : "")));
-
-                    const failed = result.results.find((r) => r.status === "failed");
-                    if (failed) {
-                        console.log(chalk.yellow(`\n部分评测失败：${failed.step}`));
-                        console.log(chalk.gray(`查看日志：.ai-tools-chain/tasks/${taskId}/eval-${failed.step}.log`));
-                    } else {
-                        console.log(chalk.green("\n评测全部通过。"));
-                    }
-                    console.log(chalk.gray(`报告：.ai-tools-chain/tasks/${taskId}/eval-report.json`));
+                    const agent = new TestAgent();
+                    const result = await agent.step({ cwd, aiDir, tasksDir, taskId });
+                    (result.logs || []).forEach((ln) => console.log(ln));
                     await autoArchiveOldTasks(aiDir);
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
+                    }
                 } catch (e) {
                     console.log(chalk.red("评测执行失败："), e.message || e);
                 }

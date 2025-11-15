@@ -64,7 +64,10 @@ export async function invokeRole(role, payload, ctx) {
         try {
             const res = await adapter.invoke(role, payload, { cwd, step, aiDir, prompts: cfg.prompts });
             if (res?.ok) return res;
-            errors.push(`${step.provider} 返回非 ok`);
+            const detail = res && typeof res.error === "string" && res.error
+                ? `: ${res.error}`
+                : "";
+            errors.push(`${step.provider} 返回非 ok${detail}`);
         } catch (e) {
             errors.push(`${step.provider} 失败: ${e?.message || e}`);
         }
