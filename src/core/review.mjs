@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { execa } from "execa";
 import { invokeRole } from "../models/broker.mjs";
+import { summarizeCreatedFiles, summarizeModifiedWithGit } from "../domain/diff.mjs";
 
 function pathIsUnder(p, base) {
     return p === base || p.startsWith(base);
@@ -16,21 +17,27 @@ function inDanger(pathRel, dangerList) {
 }
 
 export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
-    const { stdout: numstat } = await execa("git", ["--no-pager", "diff", "--numstat"], { cwd });
-    const lines = numstat.trim() ? numstat.trim().split("\n") : [];
     let added = 0;
     let deleted = 0;
     const files = [];
-    for (const ln of lines) {
-        const m = ln.match(/^(\d+|\-)\s+(\d+|\-)\s+(.+)$/);
-        if (m) {
-            const a = m[1] === "-" ? 0 : parseInt(m[1], 10);
-            const d = m[2] === "-" ? 0 : parseInt(m[2], 10);
-            const f = m[3];
-            added += a;
-            deleted += d;
-            files.push({ path: f, added: a, deleted: d });
+
+    // 基于 git diff 统计修改文件
+    try {
+        const { stdout: numstat } = await execa("git", ["--no-pager", "diff", "--numstat"], { cwd });
+        const lines = numstat.trim() ? numstat.trim().split("\n") : [];
+        for (const ln of lines) {
+            const m = ln.match(/^(\d+|\-)\s+(\d+|\-)\s+(.+)$/);
+            if (m) {
+                const a = m[1] === "-" ? 0 : parseInt(m[1], 10);
+                const d = m[2] === "-" ? 0 : parseInt(m[2], 10);
+                const f = m[3];
+                added += a;
+                deleted += d;
+                files.push({ path: f, added: a, deleted: d });
+            }
         }
+    } catch {
+        // best-effort
     }
 
     // 补充：从 patch.json 中读取新增文件，计入摘要
@@ -39,20 +46,13 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         if (fs.existsSync(patchPath)) {
             const { items = [] } = JSON.parse(readFileSync(patchPath, "utf-8"));
             const creates = items.filter((it) => it.op === "create");
-            for (const it of creates) {
-                const already = files.find((f) => f.path === it.path);
+            const summary = summarizeCreatedFiles(cwd, creates);
+            for (const nf of summary.files) {
+                const already = files.find((f) => f.path === nf.path);
                 if (already) continue;
-                const abs = resolve(cwd, it.path);
-                let text = "";
-                try {
-                    text = readFileSync(abs, "utf-8");
-                } catch {
-                    text = "";
-                }
-                const lineCount = text ? text.split(/\r?\n/).length : 0;
-                added += lineCount;
-                files.push({ path: it.path, added: lineCount, deleted: 0 });
+                files.push(nf);
             }
+            added += summary.totalAdded;
         }
     } catch {
         // 若 patch.json 解析失败，忽略新增文件摘要

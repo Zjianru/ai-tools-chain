@@ -5,11 +5,12 @@ import { resolve, dirname } from "path";
 import readline from "readline";
 import { execa } from "execa";
 import { readIni, loadMasks, ensureProjectInited, createNewTask, autoArchiveOldTasks, nowISO } from "../core/task.mjs";
-import { runPlanningWithInputs, callPlanningOnce, applyPlanningAndOpenSpec } from "../core/planning.mjs";
+import { runPlanningWithInputs } from "../core/planning.mjs";
 import { runCodegenCore } from "../core/codegen.mjs";
 import { runReviewCore } from "../core/review.mjs";
 import { runEvalCore } from "../core/eval.mjs";
 import { runAcceptCore } from "../core/accept.mjs";
+import { PlanningAgent } from "../agents/planningAgent.mjs";
 
 async function promptLine(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -114,83 +115,24 @@ export async function runRepl(cwd) {
             if (cmd === "/plan") {
                 const rest = lineRaw.slice(cmd.length).trim();
                 const brief = rest || await ask(chalk.cyan("用一两句话描述这次你想完成的改动（回车结束） > "));
-                const history = [];
-                const maxRounds = 3;
-                let planning = null;
-                let usedRound = 0;
                 try {
-                    for (let round = 1; round <= maxRounds; round++) {
-                        const res = await callPlanningOnce({
-                            cwd,
-                            aiDir,
-                            tasksDir,
-                            taskId,
-                            userBrief: brief,
-                            history,
-                            round
-                        });
-
-                        const status = res.status || "ready";
-                        const questions = Array.isArray(res.questions) ? res.questions : [];
-                        if (status === "need_clarification" && questions.length > 0 && round < maxRounds) {
-                            const qa = { round, questions: [], answers: [] };
-                            for (const q of questions) {
-                                const ans = await ask(chalk.cyan(`${q} > `));
-                                qa.questions.push(q);
-                                qa.answers.push(ans);
-
-                                const transcriptPath = resolve(tasksDir, taskId, "planning.transcript.jsonl");
-                                appendJSONL(transcriptPath, {
-                                    ts: nowISO(),
-                                    role: "assistant",
-                                    round,
-                                    question: q
-                                });
-                                appendJSONL(transcriptPath, {
-                                    ts: nowISO(),
-                                    role: "user",
-                                    round,
-                                    answer: ans
-                                });
-                            }
-                            history.push(qa);
-                            continue;
-                        }
-
-                        if (res.planning) {
-                            planning = res.planning;
-                            usedRound = round;
-                            break;
-                        }
+                    const agent = new PlanningAgent();
+                    const result = await agent.step(
+                        { cwd, aiDir, tasksDir, taskId, metaPath },
+                        { from: "user", content: brief }
+                    );
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.questions && result.questions.length) {
+                        console.log(chalk.yellow("AI 认为信息不足，目前多轮澄清尚未在 REPL 内实现，将暂时回退到手动问答流程。"));
+                        await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
+                    }
+                    if (!result.logs && !result.questions) {
+                        console.log(chalk.yellow("AI 规划未返回结果，将回退到手动问答流程。"));
+                        await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
                     }
                 } catch (e) {
                     console.log(chalk.yellow("AI 规划失败，回退到手动问答："), e.message || e);
-                }
-
-                if (!planning) {
-                    console.log(chalk.yellow("AI 规划未完成或未返回规划结果，将回退到手动问答流程。"));
                     await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
-                } else {
-                    try {
-                        await applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning });
-                        console.log(chalk.cyan(`已通过 AI + openspec 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
-                        console.log(chalk.gray(`规划详情：.ai-tools-chain/tasks/${taskId}/planning.ai.json（含 draft_files）`));
-                        const rounds = usedRound || 1;
-                        const reqCount = Array.isArray(planning.requirements) ? planning.requirements.length : 0;
-                        const files = Array.isArray(planning.draft_files) ? planning.draft_files : [];
-                        console.log(chalk.cyan("\n规划摘要："));
-                        console.log(`  标题：${planning.title || `Task ${taskId}`}`);
-                        console.log(`  需求数量：${reqCount}`);
-                        console.log(`  建议改动文件：${files.length ? files.join(", ") : "(未提供 draft_files，请必要时补充 plan.files.json)"}`);
-                        if (rounds > 1) {
-                            console.log(chalk.gray(`  AI 共进行了 ${rounds - 1} 轮澄清问答。`));
-                        } else {
-                            console.log(chalk.gray("  AI 认为现有信息已足够，无需额外澄清。"));
-                        }
-                    } catch (e) {
-                        console.log(chalk.yellow("基于 AI 规划生成 OpenSpec 失败，回退到手动问答："), e.message || e);
-                        await runManualPlan(lineRaw, aiDir, tasksDir, taskId, metaPath);
-                    }
                 }
                 rl.prompt();
                 return;
