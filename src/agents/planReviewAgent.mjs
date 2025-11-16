@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import fs from "fs-extra";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
 function readJsonSafe(path, fallback = null) {
@@ -25,8 +25,13 @@ export class PlanReviewAgent {
         const taskDir = resolve(tasksDir, taskId);
         fs.ensureDirSync(taskDir);
 
-        const planningPath = resolve(taskDir, "planning.ai.json");
-        const planMdPath = resolve(taskDir, "plan.md");
+        const planningDir = resolve(taskDir, "planning");
+        const planningNew = resolve(planningDir, "planning.ai.json");
+        const planningLegacy = resolve(taskDir, "planning.ai.json");
+        const planningPath = existsSync(planningNew) ? planningNew : planningLegacy;
+        const planMdNew = resolve(planningDir, "plan.md");
+        const planMdLegacy = resolve(taskDir, "plan.md");
+        const planMdPath = existsSync(planMdNew) ? planMdNew : planMdLegacy;
         const openspecValidatePath = resolve(taskDir, "logs", "openspec", "validate.json");
 
         const logs = [];
@@ -172,7 +177,7 @@ export class PlanReviewAgent {
             }
         };
 
-        const reviewJsonPath = resolve(taskDir, "plan-review.json");
+        const reviewJsonPath = resolve(planningDir, "plan-review.json");
         writeFileSync(reviewJsonPath, JSON.stringify(reviewJson, null, 2), "utf-8");
 
         const lines = [];
@@ -197,7 +202,7 @@ export class PlanReviewAgent {
             });
             lines.push("");
         }
-        const reviewMdPath = resolve(taskDir, "plan-review.md");
+        const reviewMdPath = resolve(planningDir, "plan-review.md");
         writeFileSync(reviewMdPath, lines.join("\n"), "utf-8");
 
         // 可选：调用 plan_review 模型角色，获取更细粒度的 AI 规划审查意见

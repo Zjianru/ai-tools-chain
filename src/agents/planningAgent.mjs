@@ -90,7 +90,14 @@ export class PlanningAgent {
     async step(ctx) {
         const { cwd, aiDir, tasksDir, taskId, metaPath } = ctx;
         const logs = [];
-        const transcriptPath = resolve(tasksDir, taskId, "planning.transcript.jsonl");
+        const taskDir = resolve(tasksDir, taskId);
+        const planningDir = resolve(taskDir, "planning");
+        fs.ensureDirSync(planningDir);
+        const transcriptInPlanning = resolve(planningDir, "planning.transcript.jsonl");
+        const legacyTranscript = resolve(taskDir, "planning.transcript.jsonl");
+        const transcriptPath = existsSync(legacyTranscript) && !existsSync(transcriptInPlanning)
+            ? legacyTranscript
+            : transcriptInPlanning;
 
         const entries = loadPlanningTranscript(transcriptPath);
         const userBrief = readLatestBrief(entries);
@@ -173,8 +180,8 @@ export class PlanningAgent {
                 ? [planning.acceptance]
                 : [];
 
-            logs.push(chalk.cyan(`已通过 AI + openspec 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
-            logs.push(chalk.gray(`规划详情：.ai-tools-chain/tasks/${taskId}/planning.ai.json（含 draft_files）`));
+            logs.push(chalk.cyan(`已通过 AI + openspec 生成 plan：.ai-tools-chain/tasks/${taskId}/planning/plan.md`));
+            logs.push(chalk.gray(`规划详情：.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json（含 draft_files）`));
             logs.push(chalk.cyan("\n规划摘要："));
             logs.push(`  标题：${planning.title || `Task ${taskId}`}`);
             if (why) logs.push(`  Why：${why}`);

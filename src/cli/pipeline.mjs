@@ -173,7 +173,7 @@ export async function runPipeline(name, cwd) {
     const autoAccept = String(cfg?.pipeline?.auto_accept || "false") === "true";
 
     // 初始化一个简单 brief，供 PlanningAgent 使用（非交互 demo）
-    const planningTranscript = resolve(tasksDir, taskId, "planning.transcript.jsonl");
+    const planningTranscript = resolve(tasksDir, taskId, "planning", "planning.transcript.jsonl");
     const brief = "为当前项目生成一个简单的演示变更（agents pipeline demo）。";
     fs.ensureDirSync(dirname(planningTranscript));
     if (!existsSync(planningTranscript)) {

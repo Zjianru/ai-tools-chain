@@ -103,11 +103,16 @@ export async function runRepl(cwd) {
             inputs: { title, why, what, req, targets, risks, accept }
         });
 
-        console.log(chalk.cyan(`已根据 openspec change 生成 plan：.ai-tools-chain/tasks/${taskId}/plan.md`));
+        console.log(chalk.cyan(`已根据 openspec change 生成 plan：.ai-tools-chain/tasks/${taskId}/planning/plan.md`));
     }
 
     function appendPlanningJSONL(tasksDir, taskId, obj) {
-        const p = resolve(tasksDir, taskId, "planning.transcript.jsonl");
+        const taskDir = resolve(tasksDir, taskId);
+        const planningDir = resolve(taskDir, "planning");
+        fs.ensureDirSync(planningDir);
+        const legacy = resolve(taskDir, "planning.transcript.jsonl");
+        const modern = resolve(planningDir, "planning.transcript.jsonl");
+        const p = existsSync(legacy) && !existsSync(modern) ? legacy : modern;
         fs.ensureDirSync(dirname(p));
         appendFileSync(p, JSON.stringify(obj) + "\n", "utf-8");
     }

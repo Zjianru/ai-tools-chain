@@ -106,7 +106,10 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         diffText = `${diffText}\n${extraDiffs}`;
     }
 
-    const planFile = resolve(tasksDir, taskId, "plan.md");
+    const taskDir = resolve(tasksDir, taskId);
+    const planNew = resolve(taskDir, "planning", "plan.md");
+    const planLegacy = resolve(taskDir, "plan.md");
+    const planFile = existsSync(planNew) ? planNew : planLegacy;
     let planText = "";
     try {
         planText = readFileSync(planFile, "utf-8");

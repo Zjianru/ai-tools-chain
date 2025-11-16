@@ -18,8 +18,12 @@ export class TestAgent {
         try {
             // 若存在 planning.ai.json.test_plan，先输出测试策略摘要
             try {
-                const planningPath = resolve(tasksDir, taskId, "planning.ai.json");
-                if (fs.existsSync(planningPath)) {
+                const taskDir = resolve(tasksDir, taskId);
+                const planningDir = resolve(taskDir, "planning");
+                const planningNew = resolve(planningDir, "planning.ai.json");
+                const planningLegacy = resolve(taskDir, "planning.ai.json");
+                const planningPath = fs.existsSync(planningNew) ? planningNew : planningLegacy;
+                if (planningPath && fs.existsSync(planningPath)) {
                     const planning = JSON.parse(readFileSync(planningPath, "utf-8"));
                     const tp = planning.test_plan || null;
                     if (tp) {

@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import fs from "fs-extra";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
 function readJsonSafe(path, fallback = null) {
@@ -25,9 +25,16 @@ export class PlanningMeetingAgent {
         const taskDir = resolve(tasksDir, taskId);
         fs.ensureDirSync(taskDir);
 
-        const planningPath = resolve(taskDir, "planning.ai.json");
-        const planReviewPath = resolve(taskDir, "plan-review.json");
-        const planMdPath = resolve(taskDir, "plan.md");
+        const planningDir = resolve(taskDir, "planning");
+        const planningNew = resolve(planningDir, "planning.ai.json");
+        const planningLegacy = resolve(taskDir, "planning.ai.json");
+        const planningPath = existsSync(planningNew) ? planningNew : planningLegacy;
+        const planReviewNew = resolve(planningDir, "plan-review.json");
+        const planReviewLegacy = resolve(taskDir, "plan-review.json");
+        const planReviewPath = existsSync(planReviewNew) ? planReviewNew : planReviewLegacy;
+        const planMdNew = resolve(planningDir, "plan.md");
+        const planMdLegacy = resolve(taskDir, "plan.md");
+        const planMdPath = existsSync(planMdNew) ? planMdNew : planMdLegacy;
 
         const planning = readJsonSafe(planningPath, null);
         const planReview = readJsonSafe(planReviewPath, null);
@@ -195,10 +202,10 @@ export class PlanningMeetingAgent {
             mdLines = lines;
         }
 
-        const jsonPath = resolve(taskDir, "planning.meeting.json");
+        const jsonPath = resolve(planningDir, "planning.meeting.json");
         writeFileSync(jsonPath, JSON.stringify(meetingJson, null, 2), "utf-8");
 
-        const mdPath = resolve(taskDir, "planning.meeting.md");
+        const mdPath = resolve(planningDir, "planning.meeting.md");
         writeFileSync(mdPath, mdLines.join("\n"), "utf-8");
 
         logs.push(chalk.cyan(`已生成规划会议纪要：${mdPath}`));

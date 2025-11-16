@@ -16,7 +16,7 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
     fs.ensureDirSync(changeDir);
 
     const titleText = title || `Task ${taskId}`;
-    const changeMd = [
+    const changeLines = [
         "---",
         `id: ${changeId}`,
         `title: ${titleText}`,
@@ -31,18 +31,96 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
         (what || "(待补充)"),
         "",
         "## Requirements",
-        (req ? req.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)"),
+        (req
+            ? req
+                  .split(/[,，]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((s) => `- ${s}`)
+                  .join("\n") || "- (待补充)"
+            : "- (待补充)"),
         "",
         "## Targets",
-        (targets ? targets.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)"),
+        (targets
+            ? targets
+                  .split(/[,，]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((s) => `- ${s}`)
+                  .join("\n") || "- (待补充)"
+            : "- (待补充)"),
         "",
         "## Risks and Mitigations",
         (risks || "(待补充)"),
         "",
         "## Acceptance",
-        (accept ? accept.split(/[,，]/).map(s => s.trim()).filter(Boolean).map(s => `- ${s}`).join("\n") || "- (待补充)" : "- (待补充)"),
+        (accept
+            ? accept
+                  .split(/[,，]/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                  .map((s) => `- ${s}`)
+                  .join("\n") || "- (待补充)"
+            : "- (待补充)"),
         ""
-    ].join("\n");
+    ];
+
+    // 结合 planning.ai.json 补充 Scope / Non-goals / Draft Files / Test Plan / Open Questions
+    const planningObj = planning || {};
+    const scope = planningObj.scope || "";
+    const nonGoals = Array.isArray(planningObj.non_goals) ? planningObj.non_goals : [];
+    const draftFiles = Array.isArray(planningObj.draft_files) ? planningObj.draft_files : [];
+    const testPlan = planningObj.test_plan || null;
+    const openQuestions = Array.isArray(planningObj.open_questions)
+        ? planningObj.open_questions
+        : [];
+
+    if (scope) {
+        changeLines.push("## Scope");
+        changeLines.push(scope);
+        changeLines.push("");
+    }
+
+    if (nonGoals.length) {
+        changeLines.push("## Non-Goals");
+        nonGoals.forEach((ng) => {
+            changeLines.push(`- ${ng}`);
+        });
+        changeLines.push("");
+    }
+
+    if (draftFiles.length) {
+        changeLines.push("## Draft Files");
+        draftFiles.forEach((p) => {
+            changeLines.push(`- ${p}`);
+        });
+        changeLines.push("");
+    }
+
+    if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
+        changeLines.push("## Test Plan");
+        if (testPlan.strategy) {
+            changeLines.push(`- 策略: ${testPlan.strategy}`);
+        }
+        if (Array.isArray(testPlan.cases) && testPlan.cases.length) {
+            changeLines.push("- 关键用例:");
+            testPlan.cases.forEach((c) => changeLines.push(`  - ${c}`));
+        }
+        if (testPlan.automation) {
+            changeLines.push(`- 自动化范围: ${testPlan.automation}`);
+        }
+        changeLines.push("");
+    }
+
+    if (openQuestions.length) {
+        changeLines.push("## Open Questions");
+        openQuestions.forEach((q) => {
+            changeLines.push(`- ${q}`);
+        });
+        changeLines.push("");
+    }
+
+    const changeMd = changeLines.join("\n");
     writeFileSync(resolve(changeDir, "change.md"), changeMd, "utf-8");
 
     const proposalPath = resolve(changeDir, "proposal.md");
@@ -59,8 +137,6 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
 
     const specsDir = resolve(changeDir, "specs", "task");
     fs.ensureDirSync(specsDir);
-
-    const planningObj = planning || {};
     const reqObjs = Array.isArray(planningObj.requirements) ? planningObj.requirements : [];
 
     if (reqObjs.length) {
@@ -144,7 +220,10 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
 
     try {
         const { stdout } = await execa("openspec", ["show", "--type", "change", changeId], { cwd: openspecRoot });
-        const planFile = resolve(tasksDir, taskId, "plan.md");
+        const taskDir = resolve(tasksDir, taskId);
+        const planningDir = resolve(taskDir, "planning");
+        fs.ensureDirSync(planningDir);
+        const planFile = resolve(planningDir, "plan.md");
         writeFileSync(planFile, stdout || "", "utf-8");
         writeFileSync(resolve(logsDir, "show.md.log"), stdout || "", "utf-8");
     } catch (e) {
@@ -160,8 +239,9 @@ export async function runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, meta
 
 export function ensurePlanningDraft({ tasksDir, taskId }) {
     const taskDir = resolve(tasksDir, taskId);
-    fs.ensureDirSync(taskDir);
-    const draftPath = resolve(taskDir, "planning.draft.json");
+    const planningDir = resolve(taskDir, "planning");
+    fs.ensureDirSync(planningDir);
+    const draftPath = resolve(planningDir, "planning.draft.json");
     if (!existsSync(draftPath)) {
         const draft = {
             schema_version: 1,
@@ -208,8 +288,9 @@ export function ensurePlanningDraft({ tasksDir, taskId }) {
 
 export function writePlanningDraft({ tasksDir, taskId, planning }) {
     const taskDir = resolve(tasksDir, taskId);
-    fs.ensureDirSync(taskDir);
-    const draftPath = resolve(taskDir, "planning.draft.json");
+    const planningDir = resolve(taskDir, "planning");
+    fs.ensureDirSync(planningDir);
+    const draftPath = resolve(planningDir, "planning.draft.json");
     writeFileSync(draftPath, JSON.stringify(planning, null, 2), "utf-8");
 }
 
@@ -270,8 +351,10 @@ export async function callPlanningOnce({
 export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning }) {
     const taskDir = resolve(tasksDir, taskId);
     fs.ensureDirSync(taskDir);
+    const planningDir = resolve(taskDir, "planning");
+    fs.ensureDirSync(planningDir);
 
-    const planningPath = resolve(taskDir, "planning.ai.json");
+    const planningPath = resolve(planningDir, "planning.ai.json");
     writeFileSync(planningPath, JSON.stringify(planning, null, 2), "utf-8");
     const title = planning.meta?.title || planning.title || `Task ${taskId}`;
     const why = planning.why || "";
@@ -300,7 +383,7 @@ export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, m
     };
 
     if (Array.isArray(planning.draft_files) && planning.draft_files.length) {
-        const filesJsonPath = resolve(taskDir, "plan.files.json");
+        const filesJsonPath = resolve(planningDir, "plan.files.json");
         writeFileSync(
             filesJsonPath,
             JSON.stringify({ files: planning.draft_files }, null, 2),
