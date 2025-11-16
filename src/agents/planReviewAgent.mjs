@@ -143,6 +143,14 @@ export class PlanReviewAgent {
                     message: "规划中未明确验收标准（acceptance）。"
                 });
             }
+            if (!planning.test_plan || !planning.test_plan.strategy) {
+                issues.push({
+                    id: "TEST_PLAN_EMPTY",
+                    type: "planning",
+                    severity: "warning",
+                    message: "规划中未给出测试计划（test_plan.strategy）。建议补充测试策略与关键用例。"
+                });
+            }
         }
 
         const hasError = issues.some((i) => i.severity === "error");

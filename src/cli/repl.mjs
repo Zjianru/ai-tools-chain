@@ -6,6 +6,7 @@ import readline from "readline";
 import { execa } from "execa";
 import { readIni, loadMasks, ensureProjectInited, createNewTask, autoArchiveOldTasks, nowISO } from "../core/task.mjs";
 import { loadTaskState, applyStatePatch } from "../core/state.mjs";
+import { suggestNextFromState, redoPhase } from "../core/orchestrator.mjs";
 import { runPlanningWithInputs } from "../core/planning.mjs";
 import { runCodegenCore } from "../core/codegen.mjs";
 import { runReviewCore } from "../core/review.mjs";
@@ -17,6 +18,8 @@ import { CodegenAgent } from "../agents/codegenAgent.mjs";
 import { CodeReviewAgent } from "../agents/codeReviewAgent.mjs";
 import { TestAgent } from "../agents/testAgent.mjs";
 import { ReviewMeetingAgent } from "../agents/reviewMeetingAgent.mjs";
+import { AcceptAgent } from "../agents/acceptAgent.mjs";
+import { RevertAgent } from "../agents/revertAgent.mjs";
 
 async function promptLine(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -64,7 +67,7 @@ export async function runRepl(cwd) {
     console.log(chalk.gray(`日志：.ai-tools-chain/tasks/${taskId}/transcript.jsonl`));
     console.log(
         chalk.gray(
-            "命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /status  /quit"
+            "命令：/plan  /planreview  /review  /codegen  /eval  /accept  /revert  /status  /next  /redo  /quit"
         )
     );
 
@@ -235,6 +238,80 @@ export async function runRepl(cwd) {
                 return;
             }
 
+            if (cmd === "/next") {
+                try {
+                    const suggestion = suggestNextFromState(tasksDir, taskId);
+                    if (!suggestion.phase) {
+                        console.log(chalk.green("Orchestrator 没有推荐的下一阶段（可能已经在最后阶段）。"));
+                        rl.prompt();
+                        return;
+                    }
+                    const phase = suggestion.phase;
+                    const extra = suggestion.details
+                        ? `，详情：${JSON.stringify(suggestion.details)}`
+                        : "";
+                    console.log(
+                        chalk.cyan(`Orchestrator 推荐下一阶段：${phase}（${suggestion.reason}${extra}）`)
+                    );
+
+                    // 根据阶段选择对应 Agent
+                    const ctxBase = { cwd, aiDir, tasksDir, taskId, metaPath, cfg };
+                    let agent = null;
+                    if (phase === "planning") agent = new PlanningAgent();
+                    else if (phase === "plan_review") agent = new PlanReviewAgent();
+                    else if (phase === "codegen") agent = new CodegenAgent();
+                    else if (phase === "code_review") agent = new CodeReviewAgent();
+                    else if (phase === "code_review_meeting") agent = new ReviewMeetingAgent();
+                    else if (phase === "test") agent = new TestAgent();
+                    // accept 阶段可由 /accept 命令显式触发，这里只做推荐，不自动执行
+                    if (phase === "accept") {
+                        console.log(
+                            chalk.yellow(
+                                "已建议进入 accept 阶段，请使用 /accept 命令完成 gate 判定与提交。"
+                            )
+                        );
+                        rl.prompt();
+                        return;
+                    }
+
+                    if (!agent) {
+                        console.log(chalk.yellow(`暂不支持通过 /next 自动执行阶段：${phase}`));
+                        rl.prompt();
+                        return;
+                    }
+
+                    const result = await agent.step(ctxBase);
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
+                    }
+                } catch (e) {
+                    console.log(chalk.red("/next 执行失败："), e.message || e);
+                }
+                rl.prompt();
+                return;
+            }
+
+            if (cmd === "/redo") {
+                const parts = line.split(/\s+/);
+                const phase = parts[1];
+                if (!phase) {
+                    console.log(chalk.yellow("用法：/redo <phase>，例如 /redo planning 或 /redo codegen"));
+                    rl.prompt();
+                    return;
+                }
+                try {
+                    const state = redoPhase(tasksDir, taskId, phase);
+                    console.log(chalk.cyan("已更新任务阶段："));
+                    console.log(JSON.stringify(state, null, 2));
+                    console.log(chalk.yellow("注意：/redo 仅修改状态，不自动回滚代码。如需回滚，请配合 /revert 使用。"));
+                } catch (e) {
+                    console.log(chalk.red("/redo 执行失败："), e.message || e);
+                }
+                rl.prompt();
+                return;
+            }
+
             if (cmd === "/planreview") {
                 try {
                     const agent = new PlanReviewAgent();
@@ -332,7 +409,9 @@ export async function runRepl(cwd) {
 
             if (cmd === "/accept") {
                 try {
-                    const gate = await runAcceptCore({
+                    const acceptAgent = new AcceptAgent();
+                    // 先做 gate 判定
+                    const gateResult = await acceptAgent.step({
                         cwd,
                         aiDir,
                         tasksDir,
@@ -340,6 +419,17 @@ export async function runRepl(cwd) {
                         metaPath,
                         cfg
                     });
+                    (gateResult.logs || []).forEach((ln) => console.log(ln));
+                    if (gateResult.statePatch) {
+                        applyStatePatch(tasksDir, taskId, gateResult.statePatch);
+                    }
+
+                    const gate = gateResult.gate;
+                    if (!gate) {
+                        console.log(chalk.red("未获取到 gate 结果，无法继续提交。"));
+                        rl.prompt();
+                        return;
+                    }
 
                     if (!gate.ok && gate.reason === "gate_failed") {
                         console.log(chalk.red("评测 gate 未通过，已阻断提交。可修复后重试。"));
@@ -361,7 +451,8 @@ export async function runRepl(cwd) {
 
                     const sum = await ask(chalk.cyan("请输入本次提交摘要（留空则使用默认）> "));
                     const msg = `feat(atc): codegen for task ${taskId}` + (sum ? ` – ${sum}` : "");
-                    const result = await runAcceptCore({
+                    const commitAgent = new AcceptAgent();
+                    const commitResult = await commitAgent.step({
                         cwd,
                         aiDir,
                         tasksDir,
@@ -371,11 +462,9 @@ export async function runRepl(cwd) {
                         commitMessage: msg,
                         overrideGate
                     });
-
-                    if (result.ok) {
-                        console.log(chalk.green("✅ 已提交 codegen 结果。"));
-                    } else if (result.reason === "commit_failed") {
-                        console.log(chalk.red("提交失败："), result.error || "");
+                    (commitResult.logs || []).forEach((ln) => console.log(ln));
+                    if (commitResult.statePatch) {
+                        applyStatePatch(tasksDir, taskId, commitResult.statePatch);
                     }
                 } catch (e) {
                     console.log(chalk.red("accept 失败："), e.message || e);
@@ -388,33 +477,16 @@ export async function runRepl(cwd) {
                 const ok = await ask(chalk.yellow("将回滚本次 codegen 改动。输入 YES 确认 > "));
                 if (ok !== "YES") { console.log(chalk.yellow("已取消。")); rl.prompt(); return; }
 
-                const patchPath = resolve(tasksDir, taskId, "patch.json");
-                let items = [];
-                if (existsSync(patchPath)) {
-                    try {
-                        const { items: parsed = [] } = JSON.parse(readFileSync(patchPath, "utf-8"));
-                        items = parsed;
-                    } catch {
-                        items = [];
-                    }
-                }
-
-                for (const it of items.filter((i) => i.op === "create")) {
-                    const abs = resolve(cwd, it.path);
-                    if (existsSync(abs)) fs.removeSync(abs);
-                }
                 try {
-                    await execa("git", ["restore", "--worktree", "."], { cwd }).catch(async () => {
-                        await execa("git", ["checkout", "--", "."], { cwd });
-                    });
-                    await execa("git", ["clean", "-fd"], { cwd });
+                    const agent = new RevertAgent();
+                    const result = await agent.step({ cwd, tasksDir, taskId, metaPath });
+                    (result.logs || []).forEach((ln) => console.log(ln));
+                    if (result.statePatch) {
+                        applyStatePatch(tasksDir, taskId, result.statePatch);
+                    }
                 } catch (e) {
-                    console.log(chalk.red("回滚时出现问题："), e.message);
+                    console.log(chalk.red("revert 失败："), e.message || e);
                 }
-                const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-                meta.status = "redo";
-                writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-                console.log(chalk.green("↩ 已回滚到 pre-commit 快照。"));
                 rl.prompt();
                 return;
             }

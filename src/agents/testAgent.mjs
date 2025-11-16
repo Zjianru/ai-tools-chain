@@ -1,4 +1,7 @@
 import chalk from "chalk";
+import fs from "fs-extra";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { runEvalCore } from "../core/eval.mjs";
 
 export class TestAgent {
@@ -13,6 +16,26 @@ export class TestAgent {
         const { cwd, aiDir, tasksDir, taskId } = ctx;
         const logs = [];
         try {
+            // 若存在 planning.ai.json.test_plan，先输出测试策略摘要
+            try {
+                const planningPath = resolve(tasksDir, taskId, "planning.ai.json");
+                if (fs.existsSync(planningPath)) {
+                    const planning = JSON.parse(readFileSync(planningPath, "utf-8"));
+                    const tp = planning.test_plan || null;
+                    if (tp) {
+                        logs.push(chalk.cyan("\n规划中的测试计划（test_plan）："));
+                        if (tp.strategy) logs.push("  - 策略: " + tp.strategy);
+                        if (Array.isArray(tp.cases) && tp.cases.length) {
+                            logs.push("  - 关键用例:");
+                            tp.cases.forEach((c) => logs.push("    • " + c));
+                        }
+                        if (tp.automation) logs.push("  - 自动化范围: " + tp.automation);
+                    }
+                }
+            } catch {
+                // ignore planning parse errors
+            }
+
             const result = await runEvalCore({ cwd, aiDir, tasksDir, taskId });
             if (!result.steps.length) {
                 logs.push(chalk.gray("未发现评测步骤。"));
@@ -78,4 +101,3 @@ export class TestAgent {
         }
     }
 }
-

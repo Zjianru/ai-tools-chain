@@ -285,6 +285,141 @@ export const deepseekAdapter = {
             }
         }
 
+        if (role === "planning_meeting") {
+            const planning = payload.planning || null;
+            const planReview = payload.planReview || null;
+            const planMd = payload.planMd || "";
+
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "planning_meeting",
+                [
+                    "你是一个软件项目的规划阶段会议主持人（Planning Meeting Chair）。",
+                    "你的任务是根据规划 JSON、规划审查结果与 plan.md，给出结构化的会议纪要和下一步行动建议。",
+                    "",
+                    "严格输出一个 JSON 对象，结构为：",
+                    "{",
+                    '  "meeting": {',
+                    '    "summary": "一句话总结当前规划是否可进入 codegen（例如：结构合理，可进入 codegen）",',
+                    '    "key_points": ["要点 1", "要点 2"],',
+                    '    "risks": ["风险 1", "风险 2"],',
+                    '    "open_questions": ["尚待澄清的问题 1"],',
+                    '    "next_actions": ["下一步行动 1", "行动 2"],',
+                    '    "decision": "go | hold | redo_planning"',
+                    "  }",
+                    "}",
+                    "",
+                    "- 严禁输出 Markdown 代码块标记（```），只输出 JSON。"
+                ].join("\n")
+            );
+
+            const systemMsg = {
+                role: "system",
+                content: systemContent
+            };
+
+            const planningText = planning ? JSON.stringify(planning, null, 2) : "(无 planning.ai.json)";
+            const planReviewText = planReview ? JSON.stringify(planReview, null, 2) : "(无 plan-review.json)";
+            const userMsg = {
+                role: "user",
+                content: [
+                    "[PLANNING.JSON]",
+                    planningText.slice(0, 8000),
+                    "",
+                    "[PLAN-REVIEW.JSON]",
+                    planReviewText.slice(0, 4000),
+                    "",
+                    "[PLAN.MD]",
+                    (planMd || "(无 plan.md)").slice(0, 4000)
+                ].join("\n")
+            };
+
+            const { data, content } = await callDeepseekChat({
+                apiKey,
+                model,
+                messages: [systemMsg, userMsg],
+                extra: {}
+            });
+
+            try {
+                const text = extractJson(content || "");
+                const parsed = JSON.parse(text);
+                return {
+                    ok: true,
+                    meeting: parsed.meeting || parsed,
+                    usage: data?.usage || null,
+                    raw: data
+                };
+            } catch {
+                return { ok: false, error: "planning_meeting_json_parse_failed" };
+            }
+        }
+
+        if (role === "review_meeting") {
+            const review = payload.review || null;
+            const secondOpinion = payload.secondOpinion || "";
+
+            const systemContent = loadProjectPrompt(
+                aiDir,
+                "review_meeting",
+                [
+                    "你是一个软件项目的代码审查会议主持人（Code Review Meeting Chair）。",
+                    "你的任务是根据 review.json 和 second_opinion.md，给出结构化的会议纪要和下一步行动建议。",
+                    "",
+                    "严格输出一个 JSON 对象，结构为：",
+                    "{",
+                    '  "meeting": {',
+                    '    "summary": "总体审查结论",',
+                    '    "risks": ["风险 1", "风险 2"],',
+                    '    "suggestions": ["建议 1", "建议 2"],',
+                    '    "open_questions": ["尚待澄清的问题 1"],',
+                    '    "next_actions": ["下一步行动 1"],',
+                    '    "decision": "approve | request_changes | hold"',
+                    "  }",
+                    "}",
+                    "",
+                    "- 严禁输出 Markdown 代码块标记（```），只输出 JSON。"
+                ].join("\n")
+            );
+
+            const systemMsg = {
+                role: "system",
+                content: systemContent
+            };
+
+            const reviewText = review ? JSON.stringify(review, null, 2) : "(无 review.json)";
+            const userMsg = {
+                role: "user",
+                content: [
+                    "[REVIEW.JSON]",
+                    reviewText.slice(0, 4000),
+                    "",
+                    "[SECOND_OPINION.MD]",
+                    (secondOpinion || "(无 second_opinion.md)").slice(0, 4000)
+                ].join("\n")
+            };
+
+            const { data, content } = await callDeepseekChat({
+                apiKey,
+                model,
+                messages: [systemMsg, userMsg],
+                extra: {}
+            });
+
+            try {
+                const text = extractJson(content || "");
+                const parsed = JSON.parse(text);
+                return {
+                    ok: true,
+                    meeting: parsed.meeting || parsed,
+                    usage: data?.usage || null,
+                    raw: data
+                };
+            } catch {
+                return { ok: false, error: "review_meeting_json_parse_failed" };
+            }
+        }
+
         if (role === "planning") {
             const brief = payload.userBrief || "";
             const repoSummary = payload.repoSummary || "";

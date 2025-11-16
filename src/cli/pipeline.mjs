@@ -7,6 +7,7 @@ import { ensureProjectInited, readIni, createNewTask, autoArchiveOldTasks, nowIS
 import { runPlanningWithInputs } from "../core/planning.mjs";
 import { runCodegenCore } from "../core/codegen.mjs";
 import { loadTaskState, applyStatePatch } from "../core/state.mjs";
+import { suggestNextFromState } from "../core/orchestrator.mjs";
 import { PlanningAgent } from "../agents/planningAgent.mjs";
 import { PlanReviewAgent } from "../agents/planReviewAgent.mjs";
 import { CodegenAgent } from "../agents/codegenAgent.mjs";
@@ -169,51 +170,72 @@ export async function runPipeline(name, cwd) {
 
     const ctxBase = { cwd, aiDir, tasksDir, taskId, metaPath, cfg };
 
-    // 1) planning（非交互 demo：使用固定 brief）
-    const planningAgent = new PlanningAgent();
-    const brief = "为当前项目生成一个简单的演示变更（agents pipeline demo）。";
+    // 初始化一个简单 brief，供 PlanningAgent 使用（非交互 demo）
     const planningTranscript = resolve(tasksDir, taskId, "planning.transcript.jsonl");
+    const brief = "为当前项目生成一个简单的演示变更（agents pipeline demo）。";
     fs.ensureDirSync(dirname(planningTranscript));
-    writeFileSync(
-        planningTranscript,
-        JSON.stringify({ ts: nowISO(), role: "user", kind: "brief", text: brief }) + "\n",
-        "utf-8"
-    );
-    const okPlanning = await runAgent("planning", planningAgent, ctxBase);
-    if (!okPlanning) {
-        console.log(chalk.red("[agents] planning 阶段失败，停止后续阶段。"));
-        writePipelineResult(pipelineResultPath, taskId, stages);
-        return;
+    if (!existsSync(planningTranscript)) {
+        writeFileSync(
+            planningTranscript,
+            JSON.stringify({ ts: nowISO(), role: "user", kind: "brief", text: brief }) + "\n",
+            "utf-8"
+        );
     }
 
-    // 2) plan_review
+    // Orchestrator 驱动的线性阶段执行
+    let currentPhase = "planning";
+    const planningAgent = new PlanningAgent();
     const planReviewAgent = new PlanReviewAgent();
-    const okPlanReview = await runAgent("plan_review", planReviewAgent, ctxBase);
-    if (!okPlanReview) {
-        console.log(chalk.yellow("[agents] 规划审查未通过或失败，按当前策略仍继续后续阶段（demo）。"));
-    }
-
-    // 3) codegen
     const codegenAgent = new CodegenAgent();
-    const okCodegen = await runAgent("codegen", codegenAgent, ctxBase);
-    if (!okCodegen) {
-        console.log(chalk.red("[agents] codegen 阶段失败，停止后续阶段。"));
+    const codeReviewAgent = new CodeReviewAgent();
+    const meetingAgent = new ReviewMeetingAgent();
+    const testAgent = new TestAgent();
+
+    const phaseToAgent = {
+        planning: planningAgent,
+        plan_review: planReviewAgent,
+        codegen: codegenAgent,
+        code_review: codeReviewAgent,
+        code_review_meeting: meetingAgent,
+        test: testAgent
+    };
+
+    // 执行第一个阶段
+    const okFirst = await runAgent(currentPhase, phaseToAgent[currentPhase], ctxBase);
+    if (!okFirst) {
+        console.log(chalk.red(`[agents] ${currentPhase} 阶段失败，停止后续阶段。`));
         writePipelineResult(pipelineResultPath, taskId, stages);
         return;
     }
 
-    // 4) code_review + meeting
-    const codeReviewAgent = new CodeReviewAgent();
-    const okReview = await runAgent("code_review", codeReviewAgent, ctxBase);
-    if (!okReview) {
-        console.log(chalk.yellow("[agents] code_review 阶段失败，按当前策略仍继续测试阶段（demo）。"));
+    // 后续阶段由 orchestrator 决定
+    while (true) {
+        const { phase: nextPhase, reason } = suggestNextFromState(tasksDir, taskId);
+        if (!nextPhase) {
+            console.log(chalk.green("[agents] orchestrator 没有更多阶段，流水线结束。"));
+            break;
+        }
+        console.log(chalk.gray(`[agents] orchestrator 建议下一阶段: ${nextPhase} (${reason})`));
+        const agent = phaseToAgent[nextPhase];
+        if (!agent) {
+            console.log(chalk.yellow(`[agents] 未找到阶段 ${nextPhase} 对应的 Agent，停止。`));
+            break;
+        }
+        currentPhase = nextPhase;
+        const ok = await runAgent(currentPhase, agent, ctxBase);
+        if (!ok && currentPhase === "codegen") {
+            console.log(chalk.red("[agents] codegen 阶段失败，停止后续阶段。"));
+            break;
+        }
+        if (!ok) {
+            console.log(chalk.yellow(`[agents] 阶段 ${currentPhase} 失败，按当前策略继续尝试后续阶段（demo）。`));
+        }
+        const suggestion = suggestNextFromState(tasksDir, taskId);
+        if (!suggestion.phase) {
+            console.log(chalk.green("[agents] orchestrator 没有更多阶段，流水线结束。"));
+            break;
+        }
     }
-    const meetingAgent = new ReviewMeetingAgent();
-    await runAgent("code_review_meeting", meetingAgent, ctxBase);
-
-    // 5) test
-    const testAgent = new TestAgent();
-    await runAgent("test", testAgent, ctxBase);
 
     writePipelineResult(pipelineResultPath, taskId, stages);
 }

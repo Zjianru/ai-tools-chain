@@ -29,6 +29,11 @@
     "targets": ["src/", "scripts/"],
     "risks": ["风险 1", "风险 2"],
     "acceptance": ["验收标准 1", "验收标准 2"],
+    "test_plan": {
+      "strategy": "整体测试策略（例如：先单元测试，再集成测试，重点覆盖哪些边界）",
+      "cases": ["关键测试用例 1", "关键测试用例 2"],
+      "automation": "需要/不需要自动化测试及范围"
+    },
     "draft_files": ["建议改动或新增的文件路径，如 src/Main.java"],
     "tasks": ["具体任务 1", "具体任务 2"],
     "notes": "可选补充说明/待确认事项"
@@ -43,10 +48,10 @@
 - 如果信息已经足够：
   - 设置 status = "ready"；
   - questions 为 []；
-  - 完整填充 planning 对象，尤其是 requirements 与 draft_files。
+  - 完整填充 planning 对象，尤其是 requirements / draft_files / test_plan。
 
 其他要求：
 - requirements 中的 shall 必须包含英文单词 SHALL，便于后续 OpenSpec 校验；
 - draft_files 必须列出你建议改动的具体文件路径，后续 codegen 只对这些文件生成/修改代码；
+- test_plan 用于指导后续 /eval 阶段的测试设计：请尽量给出可执行的策略和 3–5 个关键用例；在信息严重不足时，可以先给出保守的占位方案，并在 notes 中说明不确定性；
 - 不得输出任何非 JSON 内容（例如“好的，我会按照要求输出”之类的自然语言）。
-
