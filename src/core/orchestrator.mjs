@@ -28,9 +28,7 @@ export function suggestNextFromState(tasksDir, taskId) {
     // 基于 plan-review 结果：若未通过，建议回到 planning
     if (currentPhase === "plan_review") {
         const taskDir = resolve(tasksDir, taskId);
-        const planReviewNew = resolve(taskDir, "planning", "plan-review.json");
-        const planReviewLegacy = resolve(taskDir, "plan-review.json");
-        const planReviewPath = existsSync(planReviewNew) ? planReviewNew : planReviewLegacy;
+        const planReviewPath = resolve(taskDir, "planning", "plan-review.json");
         if (existsSync(planReviewPath)) {
             try {
                 const pr = JSON.parse(readFileSync(planReviewPath, "utf-8"));

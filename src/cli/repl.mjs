@@ -110,9 +110,7 @@ export async function runRepl(cwd) {
         const taskDir = resolve(tasksDir, taskId);
         const planningDir = resolve(taskDir, "planning");
         fs.ensureDirSync(planningDir);
-        const legacy = resolve(taskDir, "planning.transcript.jsonl");
-        const modern = resolve(planningDir, "planning.transcript.jsonl");
-        const p = existsSync(legacy) && !existsSync(modern) ? legacy : modern;
+        const p = resolve(planningDir, "planning.transcript.jsonl");
         fs.ensureDirSync(dirname(p));
         appendFileSync(p, JSON.stringify(obj) + "\n", "utf-8");
     }

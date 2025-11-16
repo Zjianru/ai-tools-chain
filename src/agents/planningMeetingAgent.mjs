@@ -26,15 +26,9 @@ export class PlanningMeetingAgent {
         fs.ensureDirSync(taskDir);
 
         const planningDir = resolve(taskDir, "planning");
-        const planningNew = resolve(planningDir, "planning.ai.json");
-        const planningLegacy = resolve(taskDir, "planning.ai.json");
-        const planningPath = existsSync(planningNew) ? planningNew : planningLegacy;
-        const planReviewNew = resolve(planningDir, "plan-review.json");
-        const planReviewLegacy = resolve(taskDir, "plan-review.json");
-        const planReviewPath = existsSync(planReviewNew) ? planReviewNew : planReviewLegacy;
-        const planMdNew = resolve(planningDir, "plan.md");
-        const planMdLegacy = resolve(taskDir, "plan.md");
-        const planMdPath = existsSync(planMdNew) ? planMdNew : planMdLegacy;
+        const planningPath = resolve(planningDir, "planning.ai.json");
+        const planReviewPath = resolve(planningDir, "plan-review.json");
+        const planMdPath = resolve(planningDir, "plan.md");
 
         const planning = readJsonSafe(planningPath, null);
         const planReview = readJsonSafe(planReviewPath, null);
@@ -60,6 +54,7 @@ export class PlanningMeetingAgent {
         const scope = planning.scope || "";
         const nonGoals = Array.isArray(planning.non_goals) ? planning.non_goals : [];
         const openQuestions = Array.isArray(planning.open_questions) ? planning.open_questions : [];
+        const testPlan = planning.test_plan || null;
 
         const issues = Array.isArray(planReview?.issues) ? planReview.issues : [];
         const blocking = issues.filter((i) => i.severity === "error");
@@ -187,6 +182,18 @@ export class PlanningMeetingAgent {
                 lines.push("## 发现的问题/风险");
                 lines.push("");
                 lines.push("- （当前未发现结构层问题）");
+                lines.push("");
+            }
+
+            if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
+                lines.push("## 测试计划摘要（来自规划）");
+                lines.push("");
+                if (testPlan.strategy) lines.push(`- 策略: ${testPlan.strategy}`);
+                if (Array.isArray(testPlan.cases) && testPlan.cases.length) {
+                    lines.push("- 关键用例:");
+                    testPlan.cases.forEach((c) => lines.push(`  - ${c}`));
+                }
+                if (testPlan.automation) lines.push(`- 自动化范围: ${testPlan.automation}`);
                 lines.push("");
             }
 

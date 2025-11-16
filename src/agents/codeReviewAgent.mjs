@@ -32,6 +32,39 @@ export class CodeReviewAgent {
             logs.push(chalk.gray(`\nsecond opinion: ${result.secondOpinionPath}`));
             logs.push(chalk.gray(`review JSON  : ${result.reviewPath}`));
 
+            if (result.planningChecks && result.planningContext) {
+                const pc = result.planningChecks;
+                logs.push(chalk.cyan("\n基于规划的范围检查："));
+                const plannedCount = Array.isArray(pc.planned_files)
+                    ? pc.planned_files.length
+                    : 0;
+                const outOfScope = Array.isArray(pc.out_of_scope_files)
+                    ? pc.out_of_scope_files
+                    : [];
+                logs.push(
+                    chalk.gray(
+                        `  - 规划中的目标文件数量：${plannedCount}（draft_files + file_impacts）`
+                    )
+                );
+                if (outOfScope.length) {
+                    logs.push(
+                        chalk.yellow(
+                            `  - 检测到 ${outOfScope.length} 个“可能超出规划范围”的文件：`
+                        )
+                    );
+                    outOfScope.forEach((p) => logs.push(chalk.yellow(`      • ${p}`)));
+                } else if (plannedCount) {
+                    logs.push(chalk.gray("  - 未发现明显超出规划范围的文件。"));
+                }
+                const nonGoals = Array.isArray(result.planningContext.non_goals)
+                    ? result.planningContext.non_goals
+                    : [];
+                if (nonGoals.length) {
+                    logs.push(chalk.gray("  - 规划明确的不做事项（non_goals）："));
+                    nonGoals.forEach((ng) => logs.push(chalk.gray(`      • ${ng}`)));
+                }
+            }
+
             // 简单“会后纪要”：基于 diff 摘要与危险文件列表给出一个合成结论
             const dangerCount = result.files.filter((f) => f.danger).length;
             logs.push(chalk.cyan("\n会议纪要："));

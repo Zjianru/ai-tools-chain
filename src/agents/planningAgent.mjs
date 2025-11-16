@@ -93,11 +93,7 @@ export class PlanningAgent {
         const taskDir = resolve(tasksDir, taskId);
         const planningDir = resolve(taskDir, "planning");
         fs.ensureDirSync(planningDir);
-        const transcriptInPlanning = resolve(planningDir, "planning.transcript.jsonl");
-        const legacyTranscript = resolve(taskDir, "planning.transcript.jsonl");
-        const transcriptPath = existsSync(legacyTranscript) && !existsSync(transcriptInPlanning)
-            ? legacyTranscript
-            : transcriptInPlanning;
+        const transcriptPath = resolve(planningDir, "planning.transcript.jsonl");
 
         const entries = loadPlanningTranscript(transcriptPath);
         const userBrief = readLatestBrief(entries);
@@ -221,6 +217,22 @@ export class PlanningAgent {
             } else {
                 logs.push(chalk.gray("  AI 认为现有信息已足够，无需额外澄清。"));
             }
+
+            logs.push(
+                chalk.gray(
+                    `\n详细规划文件：.ai-tools-chain/tasks/${taskId}/planning/plan.md（供人工查看）`
+                )
+            );
+            logs.push(
+                chalk.gray(
+                    `结构化规划 JSON：.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json（供后续阶段使用）`
+                )
+            );
+            logs.push(
+                chalk.gray(
+                    "下一步可：/planreview 审查规划，或使用 /next 根据 Orchestrator 建议前进。"
+                )
+            );
 
             return {
                 logs,

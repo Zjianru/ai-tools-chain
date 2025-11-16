@@ -45,7 +45,9 @@ export class ReviewMeetingAgent {
             summary: review?.summary || "",
             risks: review?.risks || [],
             suggestions: review?.suggestions || [],
-            second_opinion_preview: soText ? String(soText).slice(0, 1000) : ""
+            second_opinion_preview: soText ? String(soText).slice(0, 1000) : "",
+            planning_context: review?.planning_context,
+            planning_checks: review?.planning_checks
         };
 
         let meeting = baseMeeting;
@@ -115,6 +117,32 @@ export class ReviewMeetingAgent {
                     lines.push(baseMeeting.second_opinion_preview);
                     lines.push("");
                 }
+
+                const pc = meeting.planning_checks || baseMeeting.planning_checks;
+                const pctx = meeting.planning_context || baseMeeting.planning_context;
+                if (pc || pctx) {
+                    lines.push("");
+                    lines.push("## Planning Scope & Checks");
+                    lines.push("");
+                    if (pctx?.scope && Array.isArray(pctx.scope) && pctx.scope.length) {
+                        lines.push("- Scope:");
+                        pctx.scope.forEach((s) => lines.push(`  - ${s}`));
+                    }
+                    if (pctx?.non_goals && Array.isArray(pctx.non_goals) && pctx.non_goals.length) {
+                        lines.push("");
+                        lines.push("- Non-goals:");
+                        pctx.non_goals.forEach((ng) => lines.push(`  - ${ng}`));
+                    }
+                    const outOfScope =
+                        Array.isArray(pc?.out_of_scope_files) && pc.out_of_scope_files.length
+                            ? pc.out_of_scope_files
+                            : [];
+                    if (outOfScope.length) {
+                        lines.push("");
+                        lines.push("- Possible out-of-scope files:");
+                        outOfScope.forEach((p) => lines.push(`  - ${p}`));
+                    }
+                }
                 mdLines = lines;
                 logs.push(chalk.cyan("已通过 review_meeting 模型生成代码审查会议纪要。"));
             }
@@ -154,6 +182,31 @@ export class ReviewMeetingAgent {
                 lines.push("");
                 lines.push(meeting.second_opinion_preview);
                 lines.push("");
+            }
+            if (meeting.planning_context || meeting.planning_checks) {
+                const pc = meeting.planning_checks;
+                const pctx = meeting.planning_context;
+                lines.push("## Planning Scope & Checks");
+                lines.push("");
+                if (pctx?.scope && Array.isArray(pctx.scope) && pctx.scope.length) {
+                    lines.push("- Scope:");
+                    pctx.scope.forEach((s) => lines.push(`  - ${s}`));
+                    lines.push("");
+                }
+                if (pctx?.non_goals && Array.isArray(pctx.non_goals) && pctx.non_goals.length) {
+                    lines.push("- Non-goals:");
+                    pctx.non_goals.forEach((ng) => lines.push(`  - ${ng}`));
+                    lines.push("");
+                }
+                const outOfScope =
+                    Array.isArray(pc?.out_of_scope_files) && pc.out_of_scope_files.length
+                        ? pc.out_of_scope_files
+                        : [];
+                if (outOfScope.length) {
+                    lines.push("- Possible out-of-scope files:");
+                    outOfScope.forEach((p) => lines.push(`  - ${p}`));
+                    lines.push("");
+                }
             }
             mdLines = lines;
         }

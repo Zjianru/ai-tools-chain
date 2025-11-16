@@ -26,12 +26,8 @@ export class PlanReviewAgent {
         fs.ensureDirSync(taskDir);
 
         const planningDir = resolve(taskDir, "planning");
-        const planningNew = resolve(planningDir, "planning.ai.json");
-        const planningLegacy = resolve(taskDir, "planning.ai.json");
-        const planningPath = existsSync(planningNew) ? planningNew : planningLegacy;
-        const planMdNew = resolve(planningDir, "plan.md");
-        const planMdLegacy = resolve(taskDir, "plan.md");
-        const planMdPath = existsSync(planMdNew) ? planMdNew : planMdLegacy;
+        const planningPath = resolve(planningDir, "planning.ai.json");
+        const planMdPath = resolve(planningDir, "plan.md");
         const openspecValidatePath = resolve(taskDir, "logs", "openspec", "validate.json");
 
         const logs = [];
@@ -201,6 +197,56 @@ export class PlanReviewAgent {
                 lines.push(`- [${i.severity}] (${i.type}) ${i.message}`);
             });
             lines.push("");
+        } else {
+            lines.push("## 发现的问题/风险");
+            lines.push("");
+            lines.push("- （当前未发现结构层问题）");
+            lines.push("");
+        }
+
+        // 若规划中存在 scope/non_goals/open_questions/test_plan，可在审查报告中简单呈现
+        if (planning) {
+            const scope = planning.scope || "";
+            const nonGoals = Array.isArray(planning.non_goals) ? planning.non_goals : [];
+            const openQuestions = Array.isArray(planning.open_questions)
+                ? planning.open_questions
+                : [];
+            const testPlan = planning.test_plan || null;
+
+            if (scope || nonGoals.length) {
+                lines.push("## Scope / Non-goals（来自规划）");
+                lines.push("");
+                if (scope) {
+                    lines.push(`- Scope：${scope}`);
+                }
+                if (nonGoals.length) {
+                    lines.push(`- Non-goals：${nonGoals.join("; ")}`);
+                }
+                lines.push("");
+            }
+
+            if (openQuestions.length) {
+                lines.push("## Open Questions（来自规划）");
+                lines.push("");
+                openQuestions.forEach((q) => lines.push(`- ${q}`));
+                lines.push("");
+            }
+
+            if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
+                lines.push("## Test Plan（来自规划）");
+                lines.push("");
+                if (testPlan.strategy) {
+                    lines.push(`- 策略: ${testPlan.strategy}`);
+                }
+                if (Array.isArray(testPlan.cases) && testPlan.cases.length) {
+                    lines.push("- 关键用例:");
+                    testPlan.cases.forEach((c) => lines.push(`  - ${c}`));
+                }
+                if (testPlan.automation) {
+                    lines.push(`- 自动化范围: ${testPlan.automation}`);
+                }
+                lines.push("");
+            }
         }
         const reviewMdPath = resolve(planningDir, "plan-review.md");
         writeFileSync(reviewMdPath, lines.join("\n"), "utf-8");

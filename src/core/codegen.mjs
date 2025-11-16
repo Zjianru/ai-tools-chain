@@ -105,17 +105,13 @@ export async function runCodegenCore({
     repoSummaryOverride = null
 }) {
     const taskDir = resolve(tasksDir, taskId);
-    const planNew = resolve(taskDir, "planning", "plan.md");
-    const planLegacy = resolve(taskDir, "plan.md");
-    const planFile = existsSync(planNew) ? planNew : planLegacy;
+    const planFile = resolve(taskDir, "planning", "plan.md");
     const planText = planTextOverride ?? (existsSync(planFile) ? readFileSync(planFile, "utf-8") : "# (空计划)");
     const repoSummary = repoSummaryOverride ?? "(可选) 这里可以用 git ls-files + 目录树生成概览";
 
     // 若存在 plan.files.json，则优先使用其中的文件列表作为目标文件
     let filesFromPlan = [];
-    const filesJsonNew = resolve(taskDir, "planning", "plan.files.json");
-    const filesJsonLegacy = resolve(taskDir, "plan.files.json");
-    const filesJsonPath = existsSync(filesJsonNew) ? filesJsonNew : filesJsonLegacy;
+    const filesJsonPath = resolve(taskDir, "planning", "plan.files.json");
     if (existsSync(filesJsonPath)) {
         try {
             const parsed = JSON.parse(readFileSync(filesJsonPath, "utf-8"));

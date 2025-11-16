@@ -1,5 +1,5 @@
 import fs from "fs-extra";
-import { readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve } from "path";
 import { execa } from "execa";
 import { invokeRole } from "../models/broker.mjs";
@@ -107,9 +107,10 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
     }
 
     const taskDir = resolve(tasksDir, taskId);
-    const planNew = resolve(taskDir, "planning", "plan.md");
-    const planLegacy = resolve(taskDir, "plan.md");
-    const planFile = existsSync(planNew) ? planNew : planLegacy;
+    const planningDir = resolve(taskDir, "planning");
+    const planFile = resolve(planningDir, "plan.md");
+    const planningPath = resolve(planningDir, "planning.ai.json");
+
     let planText = "";
     try {
         planText = readFileSync(planFile, "utf-8");
@@ -117,17 +118,85 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         planText = "";
     }
 
+    let planning = null;
+    try {
+        if (existsSync(planningPath)) {
+            planning = JSON.parse(readFileSync(planningPath, "utf-8"));
+        }
+    } catch {
+        planning = null;
+    }
+
+    // 基于 planning 扩展字段做范围/风险的辅助检查（仅做提示，不 Gate）
+    const planningContext = {};
+    const planningChecks = {};
+    if (planning && typeof planning === "object") {
+        const scope = Array.isArray(planning.scope)
+            ? planning.scope
+            : planning.scope
+                ? [planning.scope]
+                : [];
+        const nonGoals = Array.isArray(planning.non_goals) ? planning.non_goals : [];
+        const openQuestions = Array.isArray(planning.open_questions)
+            ? planning.open_questions
+            : [];
+        const testPlan = planning.test_plan || null;
+
+        planningContext.meta = planning.meta || {};
+        if (scope.length) planningContext.scope = scope;
+        if (nonGoals.length) planningContext.non_goals = nonGoals;
+        if (openQuestions.length) planningContext.open_questions = openQuestions;
+        if (testPlan) planningContext.test_plan = testPlan;
+
+        const draftFiles = Array.isArray(planning.draft_files) ? planning.draft_files : [];
+        const fileImpacts = Array.isArray(planning.file_impacts)
+            ? planning.file_impacts
+            : [];
+        const impactPaths = fileImpacts
+            .map((fi) => (fi && typeof fi === "object" ? fi.path : null))
+            .filter(Boolean);
+
+        const plannedPaths = Array.from(
+            new Set(
+                [...draftFiles, ...impactPaths]
+                    .map((p) => (typeof p === "string" ? p.trim() : ""))
+                    .filter(Boolean)
+            )
+        );
+        const touchedPaths = files.map((f) => f.path);
+
+        let outOfScopeFiles = [];
+        if (plannedPaths.length) {
+            const plannedSet = new Set(plannedPaths);
+            outOfScopeFiles = touchedPaths.filter((p) => !plannedSet.has(p));
+        }
+
+        planningChecks.planned_files = plannedPaths;
+        planningChecks.touched_files = touchedPaths;
+        planningChecks.out_of_scope_files = outOfScopeFiles;
+        planningChecks.non_goals = nonGoals;
+        planningChecks.open_questions = openQuestions;
+    }
+
     // 使用 models/broker，根据 models.conf 决定 second_opinion / review 的 provider
     let so = { ok: false, notes: "" };
     let rv = { ok: false, summary: "未配置 review provider", risks: [], suggestions: [] };
     try {
-        const soRes = await invokeRole("second_opinion", { planText, diffText }, { aiDir, cwd });
+        const soRes = await invokeRole(
+            "second_opinion",
+            { planText, diffText, planning },
+            { aiDir, cwd }
+        );
         if (soRes?.ok) so = soRes;
     } catch {
         // ignore, 保持默认
     }
     try {
-        const rvRes = await invokeRole("review", { diffText }, { aiDir, cwd });
+        const rvRes = await invokeRole(
+            "review",
+            { diffText, planText, planning },
+            { aiDir, cwd }
+        );
         if (rvRes?.ok) rv = rvRes;
     } catch {
         // ignore, 保持默认
@@ -139,7 +208,12 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
     writeFileSync(soPath, String(so.notes || ""), "utf-8");
 
     const reviewPath = resolve(tasksDir, taskId, "review.json");
-    writeFileSync(reviewPath, JSON.stringify(rv, null, 2), "utf-8");
+    const fullReview = {
+        ...rv,
+        planning_context: Object.keys(planningContext).length ? planningContext : undefined,
+        planning_checks: Object.keys(planningChecks).length ? planningChecks : undefined
+    };
+    writeFileSync(reviewPath, JSON.stringify(fullReview, null, 2), "utf-8");
 
     return {
         summary: {
@@ -151,6 +225,8 @@ export async function runReviewCore({ cwd, aiDir, tasksDir, taskId, cfg }) {
         secondOpinionPath: soPath,
         reviewPath,
         reviewSummary: rv.summary || "",
-        secondOpinionPreview: String(so.notes || "").slice(0, 800)
+        secondOpinionPreview: String(so.notes || "").slice(0, 800),
+        planningContext,
+        planningChecks
     };
 }
