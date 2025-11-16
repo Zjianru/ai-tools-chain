@@ -14,6 +14,7 @@ import { CodegenAgent } from "../agents/codegenAgent.mjs";
 import { CodeReviewAgent } from "../agents/codeReviewAgent.mjs";
 import { ReviewMeetingAgent } from "../agents/reviewMeetingAgent.mjs";
 import { TestAgent } from "../agents/testAgent.mjs";
+import { AcceptAgent } from "../agents/acceptAgent.mjs";
 
 export async function runPipeline(name, cwd) {
     if (name !== "demo-openspec" && name !== "agents") {
@@ -169,6 +170,7 @@ export async function runPipeline(name, cwd) {
     };
 
     const ctxBase = { cwd, aiDir, tasksDir, taskId, metaPath, cfg };
+    const autoAccept = String(cfg?.pipeline?.auto_accept || "false") === "true";
 
     // 初始化一个简单 brief，供 PlanningAgent 使用（非交互 demo）
     const planningTranscript = resolve(tasksDir, taskId, "planning.transcript.jsonl");
@@ -190,6 +192,7 @@ export async function runPipeline(name, cwd) {
     const codeReviewAgent = new CodeReviewAgent();
     const meetingAgent = new ReviewMeetingAgent();
     const testAgent = new TestAgent();
+    const acceptAgent = new AcceptAgent();
 
     const phaseToAgent = {
         planning: planningAgent,
@@ -197,7 +200,8 @@ export async function runPipeline(name, cwd) {
         codegen: codegenAgent,
         code_review: codeReviewAgent,
         code_review_meeting: meetingAgent,
-        test: testAgent
+        test: testAgent,
+        accept: acceptAgent
     };
 
     // 执行第一个阶段
@@ -213,6 +217,14 @@ export async function runPipeline(name, cwd) {
         const { phase: nextPhase, reason } = suggestNextFromState(tasksDir, taskId);
         if (!nextPhase) {
             console.log(chalk.green("[agents] orchestrator 没有更多阶段，流水线结束。"));
+            break;
+        }
+        if (nextPhase === "accept" && !autoAccept) {
+            console.log(
+                chalk.gray(
+                    "[agents] orchestrator 建议进入 accept 阶段，但当前未启用 auto_accept，流水线在 test 阶段结束。"
+                )
+            );
             break;
         }
         console.log(chalk.gray(`[agents] orchestrator 建议下一阶段: ${nextPhase} (${reason})`));

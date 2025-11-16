@@ -151,7 +151,7 @@ REPL 内支持的斜杠命令：
   - OpenSpec 官方 CLI 深度接入（基于 change 的 JSON/MD 输出）
   - Promptfoo 结果解析细化为指标阈值，补充 Gate 策略
   - 日志目录化与整目录归档（7 天规则）
-- 更多细节见：`docs/AI-Tools-Chain-项目介绍与设计说明.md`、`docs/ai-tools-chain-status-and-integration.md`、`docs/ai-tools-chain-milestones-DoD-MVP.md`、`docs/ai-tools-chain-PRD-v1.txt`
+- 更多细节见：`docs/overview/AI-Tools-Chain-项目介绍与设计说明.md`、`docs/overview/ai-tools-chain-status-and-integration.md`、`docs/milestones/ai-tools-chain-milestones-DoD-MVP.md`、`docs/overview/ai-tools-chain-PRD-v1.txt`
 
 ---
 
