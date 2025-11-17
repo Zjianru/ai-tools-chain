@@ -2,6 +2,8 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { loadTaskState } from "../core/state.mjs";
 import { nowISO } from "../core/task.mjs";
+import { loadPlanningTranscript, readLatestBrief } from "./transcript.mjs";
+import { PlanningMeetingSchema } from "../core/schemas.mjs";
 
 function readJsonSafe(path, fallback = null) {
     try {
@@ -31,6 +33,19 @@ export function loadPlanningAndReview({ tasksDir, taskId }) {
     const planningActor = (state.actors && state.actors.planning) || {};
     const currentRound = planningActor.round || 1;
 
+    // best-effort 从 transcript 中提取本轮之前的 brief 作为 input_snapshot.brief
+    let inputSnapshot = {};
+    try {
+        const transcriptPath = resolve(planningDir, "planning.transcript.jsonl");
+        const entries = loadPlanningTranscript(transcriptPath);
+        const brief = readLatestBrief(entries);
+        if (brief) {
+            inputSnapshot = { brief };
+        }
+    } catch {
+        inputSnapshot = {};
+    }
+
     return {
         planningDir,
         planningPath,
@@ -39,7 +54,8 @@ export function loadPlanningAndReview({ tasksDir, taskId }) {
         planning,
         planReview,
         planMd,
-        currentRound
+        currentRound,
+        inputSnapshot
     };
 }
 
@@ -49,7 +65,8 @@ export function buildPlanningMeetingArtifacts({
     planReview,
     planMd,
     aiMeeting,
-    currentRound
+    currentRound,
+    inputSnapshot
 }) {
     const title = planning.meta?.title || planning.title || `Task ${taskId}`;
     const why = planning.why || "";
@@ -66,12 +83,33 @@ export function buildPlanningMeetingArtifacts({
     const blocking = issues.filter((i) => i.severity === "error");
     const warnings = issues.filter((i) => i.severity === "warning");
 
+    const perRoleVerdicts =
+        aiMeeting && aiMeeting.per_role_verdicts && typeof aiMeeting.per_role_verdicts === "object"
+            ? aiMeeting.per_role_verdicts
+            : {};
+    const optionsFromAi =
+        aiMeeting && Array.isArray(aiMeeting.options) ? aiMeeting.options : [];
+
+    const testVerdict = perRoleVerdicts.TestPlanner || null;
+    const riskVerdict = perRoleVerdicts.RiskPlanner || null;
+    const testNotOk = testVerdict && testVerdict.ok === false;
+    const riskHighNotOk =
+        riskVerdict && riskVerdict.ok === false && (riskVerdict.confidence ?? 1) >= 0.8;
+
     let decision = "hold";
     if (blocking.length) {
         decision = "redo_planning";
+    } else if (aiMeeting && typeof aiMeeting.decision === "string") {
+        decision = aiMeeting.decision;
+    } else if (testNotOk || riskHighNotOk) {
+        decision = "hold";
     } else if (planReview && planReview.ok) {
         decision = "go";
     }
+
+    const coachSummary = aiMeeting && typeof aiMeeting.summary === "string" ? aiMeeting.summary : "";
+
+    const now = nowISO();
 
     const baseMeetingJson = {
         taskId,
@@ -89,14 +127,82 @@ export function buildPlanningMeetingArtifacts({
         },
         issues,
         plan_md_present: !!planMd,
+        issues_discussion:
+            Object.keys(perRoleVerdicts).length > 0
+                ? [
+                      {
+                          issue_id: "overall-planning",
+                          title: "整体规划可进入后续阶段的可行性",
+                          rounds: [
+                              {
+                                  round: currentRound || 1,
+                                  at: now,
+                                  entries: (function () {
+                                      const roleOrder = [
+                                          "ProductPlanner",
+                                          "SystemDesigner",
+                                          "SeniorDeveloper",
+                                          "TestPlanner",
+                                          "RiskPlanner"
+                                      ];
+                                      const entries = [];
+                                      for (const role of roleOrder) {
+                                          const v = perRoleVerdicts[role];
+                                          if (!v) continue;
+                                          let position = "concern";
+                                          if (v.ok === true) position = "agree";
+                                          else if (v.ok === false) position = "block";
+                                          const reasons = Array.isArray(v.reasons)
+                                              ? v.reasons
+                                              : [];
+                                          const comment = reasons[0] || "";
+                                          entries.push({
+                                              role,
+                                              position,
+                                              comment,
+                                              based_on_roles: [],
+                                              verdict_snapshot: {
+                                                  ok: v.ok ?? null,
+                                                  reasons
+                                              }
+                                          });
+                                      }
+
+                                      // Coach 汇总条目
+                                      const coachPosition =
+                                          decision === "go"
+                                              ? "agree"
+                                              : decision === "redo_planning"
+                                              ? "block"
+                                              : "concern";
+                                      entries.push({
+                                          role: "Coach",
+                                          position: coachPosition,
+                                          comment:
+                                              coachSummary ||
+                                              "教练综合各角色意见给出的总体判断。",
+                                          based_on_roles: Object.keys(perRoleVerdicts),
+                                          verdict_snapshot: {
+                                              ok: decision === "go" ? true : decision === "hold" ? null : false,
+                                              reasons: []
+                                          }
+                                      });
+
+                                      return entries;
+                                  })()
+                              }
+                          ]
+                      }
+                  ]
+                : [],
         rounds: [
             {
                 round: currentRound || 1,
-                at: nowISO(),
-                input_snapshot: {},
-                per_role_verdicts: {},
-                options: [],
-                coach_summary: "",
+                at: now,
+                input_snapshot: inputSnapshot || {},
+                per_role_verdicts: perRoleVerdicts,
+                options: optionsFromAi,
+                coach_summary: coachSummary,
                 decision
             }
         ]
@@ -149,13 +255,19 @@ export function buildPlanningMeetingArtifacts({
         const actions = Array.isArray(m.next_actions) ? m.next_actions : [];
         lines.push("## 下一步建议");
         lines.push("");
+        if (testNotOk) {
+            lines.push("- 测试视角：TestPlanner 认为当前规划不可测或测试计划不足。");
+        }
+        if (riskHighNotOk) {
+            lines.push("- 风险视角：RiskPlanner 认为存在未解决的高风险或信息黑洞。");
+        }
         if (actions.length) {
             actions.forEach((a) => lines.push(`- ${a}`));
         } else if (blocking.length) {
             lines.push("- 先修复上述 error 再进入 codegen。");
         } else if (warnings.length) {
             lines.push("- 可以进入 codegen，但建议先评估并处理上述 warning。");
-        } else {
+        } else if (!testNotOk && !riskHighNotOk) {
             lines.push("- 规划结构合理，可进入 codegen 阶段。");
         }
         if (m.decision) {
@@ -196,6 +308,28 @@ export function buildPlanningMeetingArtifacts({
             lines.push("");
         }
 
+        if (Object.keys(perRoleVerdicts).length) {
+            lines.push("## 各角色结论（概要）");
+            lines.push("");
+            for (const [role, verdict] of Object.entries(perRoleVerdicts)) {
+                const status =
+                    verdict.ok === true ? "OK" : verdict.ok === false ? "NOT_OK" : "UNKNOWN";
+                const reasonLine =
+                    Array.isArray(verdict.reasons) && verdict.reasons.length
+                        ? `：${verdict.reasons[0]}`
+                        : "";
+                lines.push(`- ${role}: ${status}${reasonLine}`);
+            }
+            lines.push("");
+
+            lines.push("## 角色视角明细文件");
+            lines.push("");
+            for (const role of Object.keys(perRoleVerdicts)) {
+                lines.push(`- ${role}: roles/${role}.meeting.md`);
+            }
+            lines.push("");
+        }
+
         if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
             lines.push("## 测试计划摘要（来自规划）");
             lines.push("");
@@ -210,15 +344,24 @@ export function buildPlanningMeetingArtifacts({
 
         lines.push("## 下一步建议");
         lines.push("");
+        if (testNotOk) {
+            lines.push("- 测试视角：TestPlanner 认为当前规划不可测或测试计划不足。");
+        }
+        if (riskHighNotOk) {
+            lines.push("- 风险视角：RiskPlanner 认为存在未解决的高风险或信息黑洞。");
+        }
         if (blocking.length) {
             lines.push("- 先修复上述 error 再进入 codegen。");
         } else if (warnings.length) {
             lines.push("- 可以进入 codegen，但建议先评估并处理上述 warning。");
-        } else {
+        } else if (!testNotOk && !riskHighNotOk) {
             lines.push("- 规划结构合理，可进入 codegen 阶段。");
         }
         mdLines = lines;
     }
 
-    return { meetingJson, mdLines };
+    const parsed = PlanningMeetingSchema.safeParse(meetingJson);
+    const finalJson = parsed.success ? parsed.data : meetingJson;
+
+    return { meetingJson: finalJson, mdLines };
 }

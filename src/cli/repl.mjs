@@ -4,7 +4,14 @@ import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { resolve, dirname } from "path";
 import readline from "readline";
 import { execa } from "execa";
-import { readIni, loadMasks, ensureProjectInited, createNewTask, autoArchiveOldTasks, nowISO } from "../core/task.mjs";
+import {
+    readIni,
+    loadMasks,
+    ensureProjectInited,
+    createNewTask,
+    autoArchiveOldTasks,
+    nowISO
+} from "../core/task.mjs";
 import { loadTaskState, applyStatePatch } from "../core/state.mjs";
 import { suggestNextFromState, redoPhase } from "../core/orchestrator.mjs";
 import { PlanningAgent } from "../agents/planningAgent.mjs";
@@ -73,15 +80,23 @@ export async function runRepl(cwd) {
     const tlog = resolve(tasksDir, taskId, "transcript.jsonl");
 
     const defaultPrompt = "> ";
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: defaultPrompt });
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: defaultPrompt
+    });
     rl.prompt();
 
     let askResolver = null;
-    const ask = (question) => new Promise((resolveAns) => {
-        askResolver = resolveAns;
-        rl.setPrompt(question);
-        rl.prompt();
-    });
+    const ask = (question) =>
+        new Promise((resolveAns) => {
+            askResolver = resolveAns;
+            rl.setPrompt(question);
+            rl.prompt();
+        });
+
+    // 标记当前是否处于“规划工作坊”对话模式
+    let currentInteraction = null;
 
 
     rl.on("line", async (lineRaw) => {
@@ -108,6 +123,7 @@ export async function runRepl(cwd) {
             }
             if (cmd === "/plan") {
                 await handlePlanCommand({ lineRaw, cwd, aiDir, tasksDir, taskId, metaPath, cfg, ask });
+                currentInteraction = "planning";
                 return;
             }
 
@@ -208,36 +224,42 @@ export async function runRepl(cwd) {
                 } catch (e) {
                     console.log(chalk.red("计划审查失败："), e.message || e);
                 }
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/codegen") {
                 await handleCodegenCommand({ line, cfg, cwd, aiDir, tasksDir, taskId, metaPath, ask });
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/review") {
                 await handleReviewCommand({ cwd, aiDir, tasksDir, taskId, cfg });
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/accept") {
                 await handleAcceptCommand({ cwd, aiDir, tasksDir, taskId, metaPath, cfg, ask });
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/revert") {
                 await handleRevertCommand({ cwd, tasksDir, taskId, metaPath, ask });
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/eval") {
                 await handleEvalCommand({ cwd, aiDir, tasksDir, taskId, ask });
+                currentInteraction = null;
                 rl.prompt();
                 return;
             }
@@ -249,6 +271,26 @@ export async function runRepl(cwd) {
 
         const masked = mask(line);
         appendJSONL(tlog, { ts: nowISO(), role: "user", text: masked, stage: "draft" });
+
+        // 如果当前处于规划工作坊模式，则将用户自然语言输入追加到 planning.transcript.jsonl
+        if (currentInteraction === "planning") {
+            try {
+                const planningTranscript = resolve(
+                    tasksDir,
+                    taskId,
+                    "planning",
+                    "planning.transcript.jsonl"
+                );
+                appendJSONL(planningTranscript, {
+                    ts: nowISO(),
+                    role: "user",
+                    kind: "brief",
+                    text: masked
+                });
+            } catch {
+                // best-effort，失败时忽略
+            }
+        }
 
         const dict = (cfg?.confirm?.fallback_dict || "")
             .split(",").map((s) => s.trim()).filter(Boolean);

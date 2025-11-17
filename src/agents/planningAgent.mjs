@@ -2,7 +2,12 @@ import chalk from "chalk";
 import fs from "fs-extra";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { callPlanningOnce, applyPlanningAndOpenSpec, ensurePlanningDraft, writePlanningDraft } from "../core/planning.mjs";
+import {
+    callPlanningOnce,
+    applyPlanningAndOpenSpec,
+    ensurePlanningDraft,
+    writePlanningDraft
+} from "../core/planning.mjs";
 import { nowISO } from "../core/task.mjs";
 import {
     appendJSONL,
@@ -11,6 +16,8 @@ import {
     readLatestBrief,
     nextRoundFromTranscript
 } from "../planning/transcript.mjs";
+import { runPlanReviewCore } from "../planning/planReviewCore.mjs";
+import { PlanningMeetingAgent } from "./planningMeetingAgent.mjs";
 
 export class PlanningAgent {
     constructor() {
@@ -74,7 +81,7 @@ export class PlanningAgent {
                     });
                 });
                 logs.push(
-                    `第 ${round} 轮：AI 认为信息不足，需要进一步澄清 ${questions.length} 个问题。`
+                    `第 ${round} 轮：规划教练认为信息不足，需要进一步澄清 ${questions.length} 个问题。`
                 );
                 return { logs, questions, round };
             }
@@ -156,6 +163,52 @@ export class PlanningAgent {
                 logs.push(chalk.gray("  AI 认为现有信息已足够，无需额外澄清。"));
             }
 
+            // 在 /plan 阶段内部串联规划审查与规划会议视角
+            try {
+                const review = runPlanReviewCore({ tasksDir, taskId });
+                logs.push(
+                    chalk.cyan(
+                        `已生成规划审查结果：.ai-tools-chain/tasks/${taskId}/planning/plan-review.json`
+                    )
+                );
+                logs.push(
+                    chalk.gray(
+                        `人类可读版：.ai-tools-chain/tasks/${taskId}/planning/plan-review.md`
+                    )
+                );
+                if (!review.ok) {
+                    logs.push(
+                        chalk.yellow(
+                            "提示：规划存在阻塞性问题，建议在进入 codegen 前先根据审查结果修正规划。"
+                        )
+                    );
+                }
+            } catch (e) {
+                logs.push(
+                    chalk.yellow(
+                        `规划审查（plan-review）阶段内部执行失败：${e.message || e}（已跳过，不影响本轮规划产物写入）`
+                    )
+                );
+            }
+
+            try {
+                const meetingAgent = new PlanningMeetingAgent();
+                const meetingResult = await meetingAgent.step({
+                    cwd,
+                    aiDir,
+                    tasksDir,
+                    taskId,
+                    metaPath
+                });
+                (meetingResult.logs || []).forEach((ln) => logs.push(ln));
+            } catch (e) {
+                logs.push(
+                    chalk.yellow(
+                        `规划会议视角（planning_meeting）生成失败：${e.message || e}（已跳过，不影响本轮规划产物写入）`
+                    )
+                );
+            }
+
             logs.push(
                 chalk.gray(
                     `\n详细规划文件：.ai-tools-chain/tasks/${taskId}/planning/plan.md（供人工查看）`
@@ -168,9 +221,50 @@ export class PlanningAgent {
             );
             logs.push(
                 chalk.gray(
-                    "下一步可：/planreview 审查规划，或使用 /next 根据 Orchestrator 建议前进。"
+                    "下一步可：直接 /codegen 进入生成，或使用 /next 根据当前状态查看推荐。"
                 )
             );
+
+            // 简短汇总本轮规划会议的多角色结论（如果存在）
+            try {
+                const meetingPath = resolve(
+                    tasksDir,
+                    taskId,
+                    "planning",
+                    "planning.meeting.json"
+                );
+                const raw = readFileSync(meetingPath, "utf-8");
+                const meeting = JSON.parse(raw);
+                const round = Array.isArray(meeting.rounds) ? meeting.rounds[0] : null;
+                if (round) {
+                    const decision = round.decision || "unknown";
+                    const perRole = round.per_role_verdicts || {};
+                    logs.push(chalk.cyan("\n本轮规划会议总体决策："));
+                    logs.push(`  decision: ${decision}`);
+                    const roles = [
+                        "ProductPlanner",
+                        "SystemDesigner",
+                        "SeniorDeveloper",
+                        "TestPlanner",
+                        "RiskPlanner"
+                    ];
+                    logs.push(chalk.cyan("各角色红灯摘要："));
+                    roles.forEach((role) => {
+                        const v = perRole[role];
+                        let status = "未知";
+                        if (v && v.ok === true) status = "OK";
+                        else if (v && v.ok === false) status = "NOT_OK";
+                        logs.push(`  - ${role}: ${status}`);
+                    });
+                    logs.push(
+                        chalk.gray(
+                            "你可以继续用自然语言和规划教练对话，澄清问题后再次运行 /plan 生成新一版规划。"
+                        )
+                    );
+                }
+            } catch {
+                // best-effort 展示会议摘要，失败时忽略
+            }
 
             return {
                 logs,

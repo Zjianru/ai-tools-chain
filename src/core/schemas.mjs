@@ -27,3 +27,32 @@ export const CodegenIRSchema = z.object({
     files: z.array(CodegenIRFileSchema)
 });
 
+export const PlanningMeetingVerdictSchema = z.object({
+    ok: z.boolean().nullable().default(null),
+    confidence: z.number().min(0).max(1).optional(),
+    reasons: z.array(z.string()).default([]),
+    suggestions: z.array(z.string()).default([])
+});
+
+export const PerRoleVerdictsSchema = z.record(PlanningMeetingVerdictSchema);
+
+export const PlanningMeetingRoundSchema = z.object({
+    round: z.number().int().min(1),
+    at: z.string(),
+    input_snapshot: z.record(z.any()).default({}),
+    per_role_verdicts: PerRoleVerdictsSchema.optional(),
+    options: z.array(z.string()).default([]),
+    coach_summary: z.string().default(""),
+    decision: z.enum(["go", "hold", "redo_planning"])
+});
+
+export const PlanningMeetingSchema = z.object({
+    taskId: z.string().min(1),
+    title: z.string().min(1),
+    ok: z.boolean(),
+    planning_summary: z.record(z.any()).optional(),
+    issues: z.array(z.any()).default([]),
+    plan_md_present: z.boolean().default(false),
+    rounds: z.array(PlanningMeetingRoundSchema).min(1),
+    ai_meeting: z.any().optional()
+});

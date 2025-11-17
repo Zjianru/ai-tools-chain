@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import fs from "fs-extra";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { loadPlanningAndReview, buildPlanningMeetingArtifacts } from "../src/planning/planningMeetingCore.mjs";
+import {
+    loadPlanningAndReview,
+    buildPlanningMeetingArtifacts
+} from "../src/planning/planningMeetingCore.mjs";
 import { suggestNextFromState } from "../src/core/orchestrator.mjs";
+import { appendPlanningMemoryEntry } from "../src/planning/memory.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -219,3 +223,287 @@ test("orchestrator suggestNextFromState normalizes planning_done and test_run ph
     assert.equal(s3.reason.startsWith("eval_passed_ready_for_accept"), true);
 });
 
+test("planning memory append writes structured JSONL entries", async () => {
+    const baseDir = resolve(__dirname, "..", ".tmp-tests", "planning-memory");
+    fs.removeSync(baseDir);
+
+    const taskId = "test-memory";
+    const { planningDir } = createFakeTaskDir(baseDir, taskId);
+
+    await appendPlanningMemoryEntry(planningDir, {
+        round: 1,
+        role: "Coach",
+        kind: "decision",
+        content: "go with current scope"
+    });
+
+    const memoryPath = resolve(planningDir, "planning.memory.jsonl");
+    assert.equal(fs.existsSync(memoryPath), true);
+
+    const lines = fs.readFileSync(memoryPath, "utf-8").trim().split("\n");
+    assert.equal(lines.length, 1);
+
+    const entry = JSON.parse(lines[0]);
+    assert.equal(entry.round, 1);
+    assert.equal(entry.role, "Coach");
+    assert.equal(entry.kind, "decision");
+    assert.equal(entry.content, "go with current scope");
+    assert.ok(typeof entry.at === "string");
+});
+
+test("aiMeeting decision and summary influence meetingJson but respect blocking errors", async () => {
+    const baseDir = resolve(__dirname, "..", ".tmp-tests", "planning-meeting-ai-decision");
+    fs.removeSync(baseDir);
+
+    const taskId = "test-ai-decision";
+    const { tasksDir, taskDir, planningDir } = createFakeTaskDir(baseDir, taskId);
+
+    const statePath = resolve(taskDir, "state.json");
+    const state = {
+        task_id: taskId,
+        phase: "planning_done",
+        actors: {
+            planning: { status: "completed", round: 3 }
+        },
+        artifacts: {}
+    };
+    fs.ensureDirSync(dirname(statePath));
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    const planning = {
+        meta: { title: "AI meeting decision test" },
+        why: "why",
+        what: "what",
+        requirements: [],
+        draft_files: [],
+        acceptance: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "planning.ai.json"),
+        JSON.stringify(planning, null, 2),
+        "utf-8"
+    );
+
+    const planReviewOk = {
+        taskId,
+        ok: true,
+        issues: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "plan-review.json"),
+        JSON.stringify(planReviewOk, null, 2),
+        "utf-8"
+    );
+    fs.writeFileSync(resolve(planningDir, "plan.md"), "# Plan\n", "utf-8");
+
+    const { planning: loadedPlanning, planReview: loadedPlanReview, currentRound } =
+        loadPlanningAndReview({ tasksDir, taskId });
+
+    const aiMeeting = {
+        summary: "教练总结：暂时先搁置，需澄清范围。",
+        decision: "hold",
+        per_role_verdicts: {
+            ProductPlanner: { ok: true, reasons: ["需求范围清晰"] },
+            TestPlanner: { ok: false, reasons: ["缺少关键用例"] }
+        },
+        options: ["缩小范围后继续规划", "增加测试覆盖描述"]
+    };
+
+    const { meetingJson } = buildPlanningMeetingArtifacts({
+        taskId,
+        planning: loadedPlanning,
+        planReview: loadedPlanReview,
+        planMd: "# Plan\n",
+        aiMeeting,
+        currentRound
+    });
+
+    const round = meetingJson.rounds[0];
+    assert.equal(round.round, 3);
+    assert.equal(round.decision, "hold");
+    assert.equal(round.coach_summary, aiMeeting.summary);
+    assert.deepEqual(round.per_role_verdicts, {
+        ProductPlanner: {
+            ok: true,
+            reasons: ["需求范围清晰"],
+            suggestions: []
+        },
+        TestPlanner: {
+            ok: false,
+            reasons: ["缺少关键用例"],
+            suggestions: []
+        }
+    });
+    assert.deepEqual(round.options, aiMeeting.options);
+    assert.equal(meetingJson.ok, true);
+
+    const aiMeetingGoButBlocking = {
+        summary: "想 go 但有问题。",
+        decision: "go"
+    };
+    const planReviewBlocking = {
+        taskId,
+        ok: false,
+        issues: [{ id: "E1", severity: "error", type: "openspec", message: "broken" }]
+    };
+
+    const { meetingJson: meetingJsonBlocking } = buildPlanningMeetingArtifacts({
+        taskId,
+        planning: loadedPlanning,
+        planReview: planReviewBlocking,
+        planMd: "# Plan\n",
+        aiMeeting: aiMeetingGoButBlocking,
+        currentRound
+    });
+
+    assert.equal(meetingJsonBlocking.rounds[0].decision, "redo_planning");
+    assert.equal(meetingJsonBlocking.ok, false);
+});
+
+test("per-role TestPlanner not ok causes decision hold when no ai decision", async () => {
+    const baseDir = resolve(__dirname, "..", ".tmp-tests", "planning-meeting-test-hold");
+    fs.removeSync(baseDir);
+
+    const taskId = "test-ai-testplanner-hold";
+    const { tasksDir, taskDir, planningDir } = createFakeTaskDir(baseDir, taskId);
+
+    const statePath = resolve(taskDir, "state.json");
+    const state = {
+        task_id: taskId,
+        phase: "planning_done",
+        actors: {
+            planning: { status: "completed", round: 1 }
+        },
+        artifacts: {}
+    };
+    fs.ensureDirSync(dirname(statePath));
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    const planning = {
+        meta: { title: "TestPlanner hold test" },
+        why: "why",
+        what: "what",
+        requirements: [],
+        draft_files: [],
+        acceptance: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "planning.ai.json"),
+        JSON.stringify(planning, null, 2),
+        "utf-8"
+    );
+
+    const planReviewOk = {
+        taskId,
+        ok: true,
+        issues: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "plan-review.json"),
+        JSON.stringify(planReviewOk, null, 2),
+        "utf-8"
+    );
+    fs.writeFileSync(resolve(planningDir, "plan.md"), "# Plan\n", "utf-8");
+
+    const { planning: loadedPlanning, planReview: loadedPlanReview, currentRound } =
+        loadPlanningAndReview({ tasksDir, taskId });
+
+    const aiMeeting = {
+        summary: "内部认为测试视角有疑虑。",
+        per_role_verdicts: {
+            TestPlanner: { ok: false, reasons: ["缺少关键用例"] }
+        }
+    };
+
+    const { meetingJson, mdLines } = buildPlanningMeetingArtifacts({
+        taskId,
+        planning: loadedPlanning,
+        planReview: loadedPlanReview,
+        planMd: "# Plan\n",
+        aiMeeting,
+        currentRound
+    });
+
+    const round = meetingJson.rounds[0];
+    assert.equal(round.decision, "hold");
+
+    const md = mdLines.join("\n");
+    assert.ok(
+        md.includes("测试视角：TestPlanner 认为当前规划不可测或测试计划不足。"),
+        "md should contain TestPlanner soft gate hint"
+    );
+});
+
+test("per-role RiskPlanner high-confidence not ok biases decision to hold", async () => {
+    const baseDir = resolve(__dirname, "..", ".tmp-tests", "planning-meeting-risk-hold");
+    fs.removeSync(baseDir);
+
+    const taskId = "test-ai-riskplanner-hold";
+    const { tasksDir, taskDir, planningDir } = createFakeTaskDir(baseDir, taskId);
+
+    const statePath = resolve(taskDir, "state.json");
+    const state = {
+        task_id: taskId,
+        phase: "planning_done",
+        actors: {
+            planning: { status: "completed", round: 1 }
+        },
+        artifacts: {}
+    };
+    fs.ensureDirSync(dirname(statePath));
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    const planning = {
+        meta: { title: "RiskPlanner hold test" },
+        why: "why",
+        what: "what",
+        requirements: [],
+        draft_files: [],
+        acceptance: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "planning.ai.json"),
+        JSON.stringify(planning, null, 2),
+        "utf-8"
+    );
+
+    const planReviewOk = {
+        taskId,
+        ok: true,
+        issues: []
+    };
+    fs.writeFileSync(
+        resolve(planningDir, "plan-review.json"),
+        JSON.stringify(planReviewOk, null, 2),
+        "utf-8"
+    );
+    fs.writeFileSync(resolve(planningDir, "plan.md"), "# Plan\n", "utf-8");
+
+    const { planning: loadedPlanning, planReview: loadedPlanReview, currentRound } =
+        loadPlanningAndReview({ tasksDir, taskId });
+
+    const aiMeeting = {
+        summary: "风险视角认为存在高风险。",
+        per_role_verdicts: {
+            RiskPlanner: { ok: false, confidence: 0.9, reasons: ["外部依赖不明确"] }
+        }
+    };
+
+    const { meetingJson, mdLines } = buildPlanningMeetingArtifacts({
+        taskId,
+        planning: loadedPlanning,
+        planReview: loadedPlanReview,
+        planMd: "# Plan\n",
+        aiMeeting,
+        currentRound
+    });
+
+    const round = meetingJson.rounds[0];
+    assert.equal(round.decision, "hold");
+
+    const md = mdLines.join("\n");
+    assert.ok(
+        md.includes("风险视角：RiskPlanner 认为存在未解决的高风险或信息黑洞。"),
+        "md should contain RiskPlanner soft gate hint"
+    );
+});

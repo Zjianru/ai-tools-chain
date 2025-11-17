@@ -1,0 +1,11 @@
+{
+  "task_id": "test-ai-riskplanner-hold",
+  "phase": "planning_done",
+  "actors": {
+    "planning": {
+      "status": "completed",
+      "round": 1
+    }
+  },
+  "artifacts": {}
+}

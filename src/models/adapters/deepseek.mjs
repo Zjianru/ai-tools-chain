@@ -19,6 +19,13 @@ import {
 import {
     handlePlanning
 } from "../deepseek/planning.mjs";
+import {
+    handlePlanningProductPlanner,
+    handlePlanningSystemDesigner,
+    handlePlanningSeniorDeveloper,
+    handlePlanningTestPlanner,
+    handlePlanningRiskPlanner
+} from "../deepseek/planningRoles.mjs";
 
 export const deepseekAdapter = {
     async invoke(role, payload, { step, aiDir }) {
@@ -47,8 +54,22 @@ export const deepseekAdapter = {
         if (role === "planning") {
             return await handlePlanning({ apiKey, model, aiDir, payload });
         }
+        if (role === "planning_product_planner") {
+            return await handlePlanningProductPlanner({ apiKey, model, aiDir, payload });
+        }
+        if (role === "planning_system_designer") {
+            return await handlePlanningSystemDesigner({ apiKey, model, aiDir, payload });
+        }
+        if (role === "planning_senior_developer") {
+            return await handlePlanningSeniorDeveloper({ apiKey, model, aiDir, payload });
+        }
+        if (role === "planning_test_planner") {
+            return await handlePlanningTestPlanner({ apiKey, model, aiDir, payload });
+        }
+        if (role === "planning_risk_planner") {
+            return await handlePlanningRiskPlanner({ apiKey, model, aiDir, payload });
+        }
 
         return { ok: false };
     }
 };
-

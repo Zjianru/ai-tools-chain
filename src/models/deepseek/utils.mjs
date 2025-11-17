@@ -1,6 +1,14 @@
 import fs from "fs";
 import path from "path";
 
+const planningRolePromptFiles = {
+    planning_product_planner: "../prompts/planning/ProductPlanner.md",
+    planning_system_designer: "../prompts/planning/SystemDesigner.md",
+    planning_senior_developer: "../prompts/planning/SeniorDeveloper.md",
+    planning_test_planner: "../prompts/planning/TestPlanner.md",
+    planning_risk_planner: "../prompts/planning/RiskPlanner.md"
+};
+
 export function loadProjectPrompt(aiDir, key, fallback) {
     let prompts = {};
     try {
@@ -21,6 +29,17 @@ export function loadProjectPrompt(aiDir, key, fallback) {
             if (fs.existsSync(p)) {
                 return fs.readFileSync(p, "utf-8");
             }
+        }
+    } catch {
+        // ignore
+    }
+
+    // 其次尝试加载内置的规划角色 prompt（src/models/prompts/planning/*.md）
+    try {
+        const rel = planningRolePromptFiles[key];
+        if (rel) {
+            const url = new URL(rel, import.meta.url);
+            return fs.readFileSync(url, "utf-8");
         }
     } catch {
         // ignore
