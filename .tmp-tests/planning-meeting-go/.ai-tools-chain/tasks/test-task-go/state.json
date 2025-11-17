@@ -1,0 +1,11 @@
+{
+  "task_id": "test-task-go",
+  "phase": "planning_done",
+  "actors": {
+    "planning": {
+      "status": "completed",
+      "round": 2
+    }
+  },
+  "artifacts": {}
+}

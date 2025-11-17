@@ -1,11 +1,23 @@
 import fs from "fs-extra";
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve, dirname } from "path";
+import { readFileSync, writeFileSync } from "fs";
+import { resolve } from "path";
 import { execa } from "execa";
-import crypto from "crypto";
 import { nowISO } from "./task.mjs";
-import { summarizeModifiedWithGit, summarizeCreatedFiles } from "../domain/diff.mjs";
+import { summarizeModifiedWithGit } from "../domain/diff.mjs";
 import { invokeRole } from "../models/broker.mjs";
+import { CodegenPlanSchema, CodegenIRSchema } from "./schemas.mjs";
+import {
+    sha256,
+    isLikelyXml,
+    isLikelyJava,
+    normalizeGeneratedContent,
+    loadPlanText,
+    loadFilesFromPlan,
+    loadCachedProposals,
+    applyChangesToWorkspace,
+    writeSnapshots,
+    summarizeDiff
+} from "../codegen/utils.mjs";
 
 async function runGit(cwd, args) {
     const { stdout } = await execa("git", args, { cwd });
@@ -21,29 +33,6 @@ async function requireGitClean(cwd) {
     if (!name || !email) throw new Error("未配置 git user.name / user.email，提交将失败。请先 git config。");
 }
 
-function sha256(buf) {
-    return crypto.createHash("sha256").update(buf).digest("hex");
-}
-
-function isLikelyXml(text) {
-    const t = (text || "").trim();
-    if (!t) return false;
-    if (t.startsWith("<?xml")) return true;
-    if (t.startsWith("<project") || t.startsWith("<dependencies")) return true;
-    const angleCount = (t.match(/</g) || []).length;
-    const braceCount = (t.match(/[{}]/g) || []).length;
-    return angleCount > 10 && angleCount > braceCount * 2;
-}
-
-function isLikelyJava(text) {
-    const t = (text || "").trim();
-    if (!t) return false;
-    if (/package\s+[a-zA-Z0-9_.]+;/.test(t)) return true;
-    if (/public\s+class\s+[A-Z][A-Za-z0-9_]*/.test(t)) return true;
-    if (/import\s+org\.springframework\./.test(t)) return true;
-    return false;
-}
-
 async function generateCodegenPlan({
     cwd,
     aiDir,
@@ -53,7 +42,6 @@ async function generateCodegenPlan({
     repoSummary,
     filesFromPlan
 }) {
-    const taskDir = resolve(tasksDir, taskId);
     const codegenResult = await invokeRole(
         "codegen",
         { planText, repoSummary, files: filesFromPlan },
@@ -88,6 +76,8 @@ async function generateCodegenPlan({
         generated_at: nowISO(),
         files: proposals
     };
+    // 强协议：在落盘前校验 IR 结构
+    CodegenPlanSchema.parse(plan);
     const planPath = resolve(taskDir, "codegen.plan.json");
     writeFileSync(planPath, JSON.stringify(plan, null, 2), "utf-8");
     return proposals;
@@ -105,34 +95,10 @@ export async function runCodegenCore({
     repoSummaryOverride = null
 }) {
     const taskDir = resolve(tasksDir, taskId);
-    const planFile = resolve(taskDir, "planning", "plan.md");
-    const planText = planTextOverride ?? (existsSync(planFile) ? readFileSync(planFile, "utf-8") : "# (空计划)");
+    const planText = loadPlanText(taskDir, planTextOverride);
     const repoSummary = repoSummaryOverride ?? "(可选) 这里可以用 git ls-files + 目录树生成概览";
-
-    // 若存在 plan.files.json，则优先使用其中的文件列表作为目标文件
-    let filesFromPlan = [];
-    const filesJsonPath = resolve(taskDir, "planning", "plan.files.json");
-    if (existsSync(filesJsonPath)) {
-        try {
-            const parsed = JSON.parse(readFileSync(filesJsonPath, "utf-8"));
-            if (Array.isArray(parsed.files)) filesFromPlan = parsed.files;
-        } catch {
-            // ignore parse errors, fallback to planning.ai.json / planText
-        }
-    }
-
-    const planPath = resolve(taskDir, "codegen.plan.json");
-    let proposals = [];
-    if (existsSync(planPath)) {
-        try {
-            const cached = JSON.parse(readFileSync(planPath, "utf-8"));
-            if (Array.isArray(cached.files)) {
-                proposals = cached.files;
-            }
-        } catch {
-            // ignore, fallback to regenerate plan
-        }
-    }
+    const filesFromPlan = loadFilesFromPlan(taskDir);
+    let proposals = loadCachedProposals({ tasksDir, taskId });
     if (!proposals.length) {
         proposals = await generateCodegenPlan({
             cwd,
@@ -158,11 +124,13 @@ export async function runCodegenCore({
     const changes = [];
     const irFiles = [];
     for (const p of proposals) {
-        if (!p?.path) continue;
+        if (!p || typeof p.path !== "string") {
+            throw new Error("codegen IR 中存在缺少 path 的条目，请检查模型输出或协议实现。");
+        }
         const abs = resolve(cwd, p.path);
         fs.ensureDirSync(dirname(abs));
         const isNew = !existsSync(abs);
-        const content = p.content ?? "";
+        const content = normalizeGeneratedContent(p.path, p.content);
 
         // 简单的语言/内容一致性检查，避免将 pom.xml 之类内容写入 .java 文件
         const lowerPath = p.path.toLowerCase();
@@ -201,14 +169,8 @@ export async function runCodegenCore({
         });
     }
 
-    const filesDir = resolve(taskDir, "files");
-    for (const c of changes) {
-        const srcAbs = resolve(cwd, c.path);
-        const dstAbs = resolve(filesDir, c.path + ".full");
-        fs.ensureDirSync(dirname(dstAbs));
-        const txt = readFileSync(srcAbs, "utf-8");
-        writeFileSync(dstAbs, txt, "utf-8");
-    }
+    applyChangesToWorkspace({ cwd, changes });
+    writeSnapshots({ cwd, taskDir, changes });
 
     // 写出 codegen IR 文件，描述本次生成/修改的文件级意图
     const ir = {
@@ -216,6 +178,8 @@ export async function runCodegenCore({
         generated_at: nowISO(),
         files: irFiles
     };
+    // 校验 codegen IR 结构，避免写入不合法文件描述
+    CodegenIRSchema.parse(ir);
     writeFileSync(resolve(taskDir, "codegen.ir.json"), JSON.stringify(ir, null, 2), "utf-8");
 
     const patchJson = { taskId, generated_at: nowISO(), items: changes };
@@ -227,14 +191,7 @@ export async function runCodegenCore({
     // 汇总变更摘要：
     // - 对于新建文件（create），按文件内容行数统计新增行；
     // - 对于修改文件（modify），使用 git diff --numstat 统计增删行；
-    const files = [];
-    let added = 0;
-    let deleted = 0;
-
-    const newFiles = changes.filter((c) => c.op === "create");
-    const newSummary = summarizeCreatedFiles(cwd, newFiles);
-    files.push(...newSummary.files);
-    added += newSummary.totalAdded;
+    const { files: diffFiles, added, deleted } = summarizeDiff({ cwd, changes });
 
     const modifiedFiles = changes.filter((c) => c.op === "modify");
     if (modifiedFiles.length) {
@@ -246,13 +203,13 @@ export async function runCodegenCore({
             const diff = diffByPath.get(mf.path) || { added: 0, deleted: 0 };
             added += diff.added;
             deleted += diff.deleted;
-            files.push({ path: mf.path, added: diff.added, deleted: diff.deleted });
+            diffFiles.push({ path: mf.path, added: diff.added, deleted: diff.deleted });
         }
     }
 
     const deletedFilesEntries = changes.filter((c) => c.op === "delete");
     for (const df of deletedFilesEntries) {
-        files.push({ path: df.path, added: 0, deleted: 0 });
+        diffFiles.push({ path: df.path, added: 0, deleted: 0 });
     }
 
     return {
@@ -260,10 +217,10 @@ export async function runCodegenCore({
         branchName: branchName && branchName.trim() ? branchName.trim() : null,
         changes,
         diffSummary: {
-            filesCount: files.length,
+            filesCount: diffFiles.length,
             added,
             deleted,
-            files
+            files: diffFiles
         },
         config: cfg
     };

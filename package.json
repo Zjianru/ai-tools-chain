@@ -13,6 +13,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "node bin/ai-tools.mjs --help",
+    "test": "node --test",
     "version": "node -e \"console.log(require('./package.json').version)\""
   },
   "keywords": [
@@ -29,6 +30,7 @@
     "execa": "^9.6.0",
     "fs-extra": "^11.3.2",
     "ini": "^6.0.0",
-    "ora": "^9.0.0"
+    "ora": "^9.0.0",
+    "zod": "^3.24.1"
   }
 }

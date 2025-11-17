@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "title": "Test Planning Meeting"
+  },
+  "why": "why",
+  "what": "what",
+  "requirements": [
+    {
+      "id": "R1",
+      "title": "req"
+    }
+  ],
+  "draft_files": [
+    "src/demo.sh"
+  ],
+  "acceptance": [
+    "acc"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "taskId": "test-task-redo",
+  "ok": false,
+  "issues": [
+    {
+      "id": "OPEN_SPEC_ERR_1",
+      "severity": "error",
+      "type": "openspec",
+      "message": "broken"
+    }
+  ]
+}

@@ -17,13 +17,25 @@ export function nextPhase(currentPhase) {
     return LINEAR_PHASES[idx + 1];
 }
 
+function normalizePhase(phase) {
+    if (!phase) return getInitialPhase();
+    if (LINEAR_PHASES.includes(phase)) return phase;
+    if (phase.endsWith("_done")) {
+        const base = phase.replace(/_done$/, "");
+        if (LINEAR_PHASES.includes(base)) return base;
+    }
+    if (phase === "test_run") return "test";
+    return phase;
+}
+
 /**
  * 读取当前任务的 state.json 与部分 artifacts，并给出下一步推荐阶段。
  * 返回形如：{ phase, reason, details? }
  */
 export function suggestNextFromState(tasksDir, taskId) {
     const state = loadTaskState(tasksDir, taskId);
-    const currentPhase = state.phase || getInitialPhase();
+    const currentPhaseRaw = state.phase || getInitialPhase();
+    const currentPhase = normalizePhase(currentPhaseRaw);
 
     // 基于 plan-review 结果：若未通过，建议回到 planning
     if (currentPhase === "plan_review") {

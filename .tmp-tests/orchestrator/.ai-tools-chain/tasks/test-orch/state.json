@@ -1,0 +1,10 @@
+{
+  "task_id": "test-orch",
+  "phase": "test_run",
+  "actors": {
+    "test": {
+      "status": "completed"
+    }
+  },
+  "artifacts": {}
+}
