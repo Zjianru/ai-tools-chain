@@ -15,6 +15,7 @@
   - `requirements[]`（包含 `title/shall/scenarios`）
   - `scope` / `non_goals`
   - `acceptance[]`
+  - `assumptions[]`（模型根据常识做出的关键假设）
   - 与业务相关的 `open_questions[]`
 - `plan_review.issues[]` 中与 planning/requirements/acceptance 相关的 warning/error。
 
@@ -41,5 +42,5 @@
 - 你的输出应该帮助团队“收敛范围、明确成功标准”，而不是把 planning 重写成长篇 PRD。  
 - 当信息不足时：
   - 不要虚构需求或验收条件；  
-  - 在 `reasons` 中说明“信息缺失点”；  
-  - 在 `suggestions` 中提出需要补充的信息类型（而不是直接提问）。  
+  - 在 `reasons` 中说明“信息缺失点”或不合理的假设；  
+  - 在 `suggestions` 中提出需要补充的信息类型，或建议如何调整 `assumptions`（而不是直接抛回一堆问题给用户）。  

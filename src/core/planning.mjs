@@ -68,11 +68,7 @@ export async function callPlanningOnce({
         repoSummary = "";
     }
 
-    const planningRes = await invokeRole(
-        "planning",
-        { userBrief, repoSummary, history, draft },
-        { aiDir, cwd }
-    );
+    const planningRes = await invokeRole("planning", { userBrief, repoSummary, history, draft }, { aiDir, cwd });
     if (!planningRes?.ok) {
         throw new Error(planningRes?.error || "planning 调用失败");
     }

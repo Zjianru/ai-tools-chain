@@ -29,8 +29,8 @@ export class PlanningAgent {
      *
      * 说明：
      * - userBrief / history / draft 均从磁盘恢复；
-     * - 调用方在追加 brief 与澄清答案后再调用本方法；
-     * - 如返回 questions，调用方需在 transcript 中写入对应 round/index 的 clarify_answer。
+     * - 调用方在追加 brief 后再调用本方法；
+     * - 澄清问题不再阻塞 /plan，会以 open_questions/assumptions 的形式体现在 planning.ai.json 中。
      */
     async step(ctx) {
         const { cwd, aiDir, tasksDir, taskId, metaPath } = ctx;
@@ -65,26 +65,6 @@ export class PlanningAgent {
                 round,
                 draft
             });
-
-            const status = res.status || "ready";
-            const questions = Array.isArray(res.questions) ? res.questions : [];
-
-            if (status === "need_clarification" && questions.length > 0) {
-                questions.forEach((q, idx) => {
-                    appendJSONL(transcriptPath, {
-                        ts: nowISO(),
-                        role: "assistant",
-                        kind: "clarify_question",
-                        round,
-                        index: idx + 1,
-                        text: q
-                    });
-                });
-                logs.push(
-                    `第 ${round} 轮：规划教练认为信息不足，需要进一步澄清 ${questions.length} 个问题。`
-                );
-                return { logs, questions, round };
-            }
 
             if (res.planning) {
                 planning = res.planning;
