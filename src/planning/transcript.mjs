@@ -71,3 +71,29 @@ export function nextRoundFromTranscript(entries) {
     return maxRound + 1;
 }
 
+export function buildClarificationSummary(entries) {
+    const clarifications = new Map();
+    for (const e of entries) {
+        if (e.kind !== "clarify_question" && e.kind !== "clarify_answer") continue;
+        const round = Number(e.round) || 0;
+        const index = Number(e.index) || 0;
+        const key = `${round}-${index}`;
+        if (!clarifications.has(key)) {
+            clarifications.set(key, {
+                round,
+                index,
+                role: e.from_role || "Coach",
+                question: "",
+                answer: ""
+            });
+        }
+        const item = clarifications.get(key);
+        if (e.kind === "clarify_question") {
+            item.question = e.text || "";
+            item.role = e.from_role || item.role;
+        } else if (e.kind === "clarify_answer") {
+            item.answer = e.text || "";
+        }
+    }
+    return Array.from(clarifications.values()).filter((item) => item.question || item.answer);
+}

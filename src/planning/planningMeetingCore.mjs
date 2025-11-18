@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import { loadTaskState } from "../core/state.mjs";
 import { nowISO } from "../core/task.mjs";
-import { loadPlanningTranscript, readLatestBrief } from "./transcript.mjs";
+import { loadPlanningTranscript, readLatestBrief, buildClarificationSummary } from "./transcript.mjs";
 import { PlanningMeetingSchema } from "../core/schemas.mjs";
 
 function readJsonSafe(path, fallback = null) {
@@ -35,6 +35,7 @@ export function loadPlanningAndReview({ tasksDir, taskId }) {
 
     // best-effort 从 transcript 中提取本轮之前的 brief 作为 input_snapshot.brief
     let inputSnapshot = {};
+    let clarifications = [];
     try {
         const transcriptPath = resolve(planningDir, "planning.transcript.jsonl");
         const entries = loadPlanningTranscript(transcriptPath);
@@ -42,8 +43,10 @@ export function loadPlanningAndReview({ tasksDir, taskId }) {
         if (brief) {
             inputSnapshot = { brief };
         }
+        clarifications = buildClarificationSummary(entries);
     } catch {
         inputSnapshot = {};
+        clarifications = [];
     }
 
     return {
@@ -55,7 +58,8 @@ export function loadPlanningAndReview({ tasksDir, taskId }) {
         planReview,
         planMd,
         currentRound,
-        inputSnapshot
+        inputSnapshot,
+        clarifications
     };
 }
 
@@ -66,7 +70,9 @@ export function buildPlanningMeetingArtifacts({
     planMd,
     aiMeeting,
     currentRound,
-    inputSnapshot
+    inputSnapshot,
+    perRoleVerdictsHistory,
+    clarifications
 }) {
     const title = planning.meta?.title || planning.title || `Task ${taskId}`;
     const why = planning.why || "";
@@ -87,6 +93,13 @@ export function buildPlanningMeetingArtifacts({
         aiMeeting && aiMeeting.per_role_verdicts && typeof aiMeeting.per_role_verdicts === "object"
             ? aiMeeting.per_role_verdicts
             : {};
+    const roleDisplayMap = {
+        ProductPlanner: "产品视角",
+        SystemDesigner: "系统设计视角",
+        SeniorDeveloper: "实现视角",
+        TestPlanner: "测试视角",
+        RiskPlanner: "风险视角"
+    };
     const optionsFromAi =
         aiMeeting && Array.isArray(aiMeeting.options) ? aiMeeting.options : [];
 
@@ -201,6 +214,7 @@ export function buildPlanningMeetingArtifacts({
                 at: now,
                 input_snapshot: inputSnapshot || {},
                 per_role_verdicts: perRoleVerdicts,
+                clarifications: Array.isArray(clarifications) ? clarifications : [],
                 options: optionsFromAi,
                 coach_summary: coachSummary,
                 decision
@@ -210,6 +224,35 @@ export function buildPlanningMeetingArtifacts({
 
     let meetingJson = baseMeetingJson;
     let mdLines = null;
+
+    const roleDeltas = [];
+    if (
+        perRoleVerdictsHistory &&
+        perRoleVerdictsHistory.round1 &&
+        perRoleVerdictsHistory.round2
+    ) {
+        const round1 = perRoleVerdictsHistory.round1;
+        const round2 = perRoleVerdictsHistory.round2;
+        const roleSet = new Set([...Object.keys(round1), ...Object.keys(round2)]);
+        for (const role of roleSet) {
+            const v1 = round1[role] || {};
+            const v2 = round2[role] || {};
+            const okChanged = (v1.ok ?? null) !== (v2.ok ?? null);
+            const reason1 =
+                Array.isArray(v1.reasons) && v1.reasons.length ? v1.reasons[0] : "";
+            const reason2 =
+                Array.isArray(v2.reasons) && v2.reasons.length ? v2.reasons[0] : "";
+            if (okChanged || reason1 !== reason2) {
+                roleDeltas.push({
+                    role,
+                    from_ok: v1.ok ?? null,
+                    to_ok: v2.ok ?? null,
+                    from_reason: reason1,
+                    to_reason: reason2
+                });
+            }
+        }
+    }
 
     if (aiMeeting) {
         meetingJson = {
@@ -274,6 +317,16 @@ export function buildPlanningMeetingArtifacts({
             lines.push("");
             lines.push(`> 决策：${m.decision}`);
         }
+        if (Array.isArray(clarifications) && clarifications.length) {
+            lines.push("");
+            lines.push("## 澄清纪要");
+            lines.push("");
+            clarifications.forEach((c) => {
+                const roleInfo = c.role ? `[${c.role}]` : "";
+                lines.push(`- ${roleInfo}${c.question || "待确认"} → ${c.answer || "(暂未回答)"}`);
+            });
+        }
+
         mdLines = lines;
     }
 
@@ -328,6 +381,50 @@ export function buildPlanningMeetingArtifacts({
                 lines.push(`- ${role}: roles/${role}.meeting.md`);
             }
             lines.push("");
+
+            lines.push("## 各角色详细结论");
+            lines.push("");
+            for (const [role, verdict] of Object.entries(perRoleVerdicts)) {
+                const title = roleDisplayMap[role] || role;
+                const status =
+                    verdict.ok === true ? "OK" : verdict.ok === false ? "NOT_OK" : "UNKNOWN";
+                lines.push(`### ${title}`);
+                lines.push(`- 结论：${status}`);
+                if (Array.isArray(verdict.reasons) && verdict.reasons.length) {
+                    lines.push("- 理由：");
+                    verdict.reasons.forEach((reason) => lines.push(`  - ${reason}`));
+                }
+                if (Array.isArray(verdict.suggestions) && verdict.suggestions.length) {
+                    lines.push("- 建议：");
+                    verdict.suggestions.forEach((suggestion) => lines.push(`  - ${suggestion}`));
+                }
+                lines.push("");
+            }
+        }
+
+        if (roleDeltas.length) {
+            lines.push("## 角色结论变化（上一轮 vs 本轮）");
+            lines.push("");
+            roleDeltas.forEach((delta) => {
+                const fromStatus =
+                    delta.from_ok === true
+                        ? "OK"
+                        : delta.from_ok === false
+                        ? "NOT_OK"
+                        : "UNKNOWN";
+                const toStatus =
+                    delta.to_ok === true
+                        ? "OK"
+                        : delta.to_ok === false
+                        ? "NOT_OK"
+                        : "UNKNOWN";
+                lines.push(
+                    `- ${delta.role}: ${fromStatus} -> ${toStatus}${
+                        delta.to_reason ? `（${delta.to_reason}）` : ""
+                    }`
+                );
+            });
+            lines.push("");
         }
 
         if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
@@ -357,11 +454,187 @@ export function buildPlanningMeetingArtifacts({
         } else if (!testNotOk && !riskHighNotOk) {
             lines.push("- 规划结构合理，可进入 codegen 阶段。");
         }
+        if (Array.isArray(clarifications) && clarifications.length) {
+            lines.push("");
+            lines.push("## 澄清纪要");
+            lines.push("");
+            clarifications.forEach((c) => {
+                const roleInfo = c.role ? `[${c.role}]` : "";
+                lines.push(`- ${roleInfo}${c.question || "待确认"} → ${c.answer || "(暂未回答)"}`);
+            });
+        }
+
         mdLines = lines;
+    }
+
+    if (
+        perRoleVerdictsHistory &&
+        Array.isArray(meetingJson.rounds) &&
+        meetingJson.rounds.length > 0
+    ) {
+        meetingJson.rounds[0].per_role_verdicts_history = perRoleVerdictsHistory;
     }
 
     const parsed = PlanningMeetingSchema.safeParse(meetingJson);
     const finalJson = parsed.success ? parsed.data : meetingJson;
 
     return { meetingJson: finalJson, mdLines };
+}
+
+export function buildPlanningReport({ taskId, planning, meetingJson }) {
+    const title = planning.meta?.title || planning.title || `Task ${taskId}`;
+    const why = planning.why || "";
+    const what = planning.what || "";
+    const scope = planning.scope || "";
+    const nonGoals = Array.isArray(planning.non_goals) ? planning.non_goals : [];
+    const assumptions = Array.isArray(planning.assumptions) ? planning.assumptions : [];
+    const openQuestions = Array.isArray(planning.open_questions)
+        ? planning.open_questions
+        : [];
+    const testPlan = planning.test_plan || null;
+
+    const round0 = Array.isArray(meetingJson.rounds) ? meetingJson.rounds[0] : null;
+    const coachSummary =
+        (round0 && typeof round0.coach_summary === "string" && round0.coach_summary) ||
+        (meetingJson.meeting && typeof meetingJson.meeting.summary === "string"
+            ? meetingJson.meeting.summary
+            : "");
+    const decision =
+        (round0 && typeof round0.decision === "string" && round0.decision) ||
+        (meetingJson.meeting && typeof meetingJson.meeting.decision === "string"
+            ? meetingJson.meeting.decision
+            : "");
+
+    const perRoleVerdicts =
+        (round0 && round0.per_role_verdicts && typeof round0.per_role_verdicts === "object"
+            ? round0.per_role_verdicts
+            : {}) || {};
+    const clarifications =
+        (round0 && Array.isArray(round0.clarifications) && round0.clarifications) || [];
+
+    const lines = [];
+    lines.push(`# 规划报告 – ${title}`);
+    lines.push("");
+    lines.push(`- Task ID：${taskId}`);
+    if (why) lines.push(`- Why：${why}`);
+    if (what) lines.push(`- What：${what}`);
+    lines.push("");
+
+    lines.push("## 教练总结与决策");
+    lines.push("");
+    if (coachSummary) {
+        lines.push(`- 总结：${coachSummary}`);
+    }
+    if (decision) {
+        lines.push(`- 决策：${decision}`);
+    }
+    lines.push("");
+
+    lines.push("## 范围与非目标");
+    lines.push("");
+    if (scope) lines.push(`- Scope：${scope}`);
+    if (nonGoals.length) {
+        lines.push("- Non-goals：");
+        nonGoals.forEach((ng) => lines.push(`  - ${ng}`));
+    }
+    if (!scope && !nonGoals.length) {
+        lines.push("- （当前规划未显式声明 scope/non_goals）");
+    }
+    lines.push("");
+
+    lines.push("## 关键假设与未决问题");
+    lines.push("");
+    if (assumptions.length) {
+        lines.push("- 假设（assumptions）：");
+        assumptions.forEach((a) => lines.push(`  - ${a}`));
+    }
+    if (openQuestions.length) {
+        lines.push("- 未决问题（open_questions）：");
+        openQuestions.forEach((q) => lines.push(`  - ${q}`));
+    }
+    if (!assumptions.length && !openQuestions.length) {
+        lines.push("- （当前未记录关键假设或未决问题）");
+    }
+    lines.push("");
+
+    if (testPlan && (testPlan.strategy || (Array.isArray(testPlan.cases) && testPlan.cases.length))) {
+        lines.push("## 测试计划摘要");
+        lines.push("");
+        if (testPlan.strategy) lines.push(`- 策略：${testPlan.strategy}`);
+        if (Array.isArray(testPlan.cases) && testPlan.cases.length) {
+            lines.push("- 关键用例：");
+            testPlan.cases.forEach((c) => lines.push(`  - ${c}`));
+        }
+        if (testPlan.automation) lines.push(`- 自动化范围：${testPlan.automation}`);
+        lines.push("");
+    }
+
+    if (perRoleVerdicts && Object.keys(perRoleVerdicts).length) {
+        lines.push("## 各角色结论概要");
+        lines.push("");
+        for (const [role, verdict] of Object.entries(perRoleVerdicts)) {
+            const status =
+                verdict.ok === true ? "OK" : verdict.ok === false ? "NOT_OK" : "UNKNOWN";
+            const reasonLine =
+                Array.isArray(verdict.reasons) && verdict.reasons.length
+                    ? `：${verdict.reasons[0]}`
+                    : "";
+            lines.push(`- ${role}：${status}${reasonLine}`);
+        }
+        lines.push("");
+
+        lines.push("## 各角色详细结论");
+        lines.push("");
+        for (const [role, verdict] of Object.entries(perRoleVerdicts)) {
+            const title = roleDisplayMap[role] || role;
+            const status =
+                verdict.ok === true ? "OK" : verdict.ok === false ? "NOT_OK" : "UNKNOWN";
+            lines.push(`### ${title}`);
+            lines.push(`- 结论：${status}`);
+            if (Array.isArray(verdict.reasons) && verdict.reasons.length) {
+                lines.push("- 理由：");
+                verdict.reasons.forEach((reason) => lines.push(`  - ${reason}`));
+            }
+            if (Array.isArray(verdict.suggestions) && verdict.suggestions.length) {
+                lines.push("- 建议：");
+                verdict.suggestions.forEach((suggestion) => lines.push(`  - ${suggestion}`));
+            }
+            lines.push("");
+        }
+    }
+
+    if (roleDeltas.length) {
+        lines.push("## 角色结论变化（上一轮 vs 本轮）");
+        lines.push("");
+        roleDeltas.forEach((delta) => {
+            const fromStatus =
+                delta.from_ok === true ? "OK" : delta.from_ok === false ? "NOT_OK" : "UNKNOWN";
+            const toStatus =
+                delta.to_ok === true ? "OK" : delta.to_ok === false ? "NOT_OK" : "UNKNOWN";
+            lines.push(
+                `- ${delta.role}：${fromStatus} -> ${toStatus}${
+                    delta.to_reason ? `（${delta.to_reason}）` : ""
+                }`
+            );
+        });
+        lines.push("");
+    }
+
+    if (clarifications.length) {
+        lines.push("## 澄清纪要");
+        lines.push("");
+        clarifications.forEach((c) => {
+            const roleInfo = c.role ? `[${c.role}]` : "";
+            lines.push(`- ${roleInfo}${c.question || "待确认"} → ${c.answer || "(暂未回答)"}`);
+        });
+        lines.push("");
+    }
+
+    lines.push("## 详细规划与变更说明");
+    lines.push("");
+    lines.push(
+        "- 详细规划内容请参考 `planning/plan.md`；具体变更列表与 OpenSpec 产物请参考 `openspec/changes/task-<taskId>/`。"
+    );
+
+    return { reportLines: lines };
 }

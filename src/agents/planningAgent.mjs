@@ -49,6 +49,28 @@ export class PlanningAgent {
 
         const history = buildHistoryFromTranscript(entries);
         const draft = ensurePlanningDraft({ tasksDir, taskId });
+        let userBriefPayload = userBrief;
+        let previousReportUsed = false;
+
+        try {
+            const latestReportPath = resolve(
+                tasksDir,
+                taskId,
+                "reports",
+                "planning",
+                "latest",
+                "planning.report.md"
+            );
+            if (fs.existsSync(latestReportPath)) {
+                const report = readFileSync(latestReportPath, "utf-8").trim();
+                if (report) {
+                    userBriefPayload = `${userBrief}\n\n[PREVIOUS_PLANNING_REPORT]\n${report}`;
+                    previousReportUsed = true;
+                }
+            }
+        } catch {
+            // ignore report loading errors
+        }
 
         let planning = null;
         let usedRound = 0;
@@ -60,7 +82,7 @@ export class PlanningAgent {
                 aiDir,
                 tasksDir,
                 taskId,
-                userBrief,
+                userBrief: userBriefPayload,
                 history,
                 round,
                 draft
@@ -136,6 +158,11 @@ export class PlanningAgent {
                 acceptance.slice(0, 5).forEach((a) => {
                     logs.push(`    - ${a}`);
                 });
+            }
+            if (previousReportUsed) {
+                logs.push(
+                    chalk.gray("  已自动把上一版规划报告作为输入上下文，辅助 Workshop 对比新旧方案。")
+                );
             }
             if (rounds > 1) {
                 logs.push(chalk.gray(`  AI 共进行了 ${rounds - 1} 轮澄清问答。`));

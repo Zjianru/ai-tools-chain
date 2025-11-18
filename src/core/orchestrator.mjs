@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { loadTaskState, applyStatePatch } from "./state.mjs";
+import { snapshotPlanningVersion } from "../planning/versions.mjs";
 
 // 简单的线性阶段定义，后续可从配置或文档中抽取
 const LINEAR_PHASES = ["planning", "plan_review", "codegen", "code_review", "code_review_meeting", "test", "accept"];
@@ -98,7 +99,11 @@ export function redoPhase(tasksDir, taskId, phase) {
     const state = loadTaskState(tasksDir, taskId);
     const actors = state.actors || {};
     const actor = actors[phase] || {};
-    const nextRound = (actor.round || 0) + 1;
+    const currentRound = actor.round || 0;
+    if (phase === "planning" && currentRound > 0) {
+        snapshotPlanningVersion({ tasksDir, taskId, round: currentRound });
+    }
+    const nextRound = currentRound + 1 || 1;
     const patch = {
         phase,
         actors: {

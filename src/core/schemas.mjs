@@ -31,7 +31,8 @@ export const PlanningMeetingVerdictSchema = z.object({
     ok: z.boolean().nullable().default(null),
     confidence: z.number().min(0).max(1).optional(),
     reasons: z.array(z.string()).default([]),
-    suggestions: z.array(z.string()).default([])
+    suggestions: z.array(z.string()).default([]),
+    blocking_open_questions: z.array(z.string()).optional()
 });
 
 export const PerRoleVerdictsSchema = z.record(PlanningMeetingVerdictSchema);
@@ -41,6 +42,17 @@ export const PlanningMeetingRoundSchema = z.object({
     at: z.string(),
     input_snapshot: z.record(z.any()).default({}),
     per_role_verdicts: PerRoleVerdictsSchema.optional(),
+    clarifications: z
+        .array(
+            z.object({
+                round: z.number().optional(),
+                index: z.number().optional(),
+                role: z.string().optional(),
+                question: z.string().optional(),
+                answer: z.string().optional()
+            })
+        )
+        .default([]),
     options: z.array(z.string()).default([]),
     coach_summary: z.string().default(""),
     decision: z.enum(["go", "hold", "redo_planning"])

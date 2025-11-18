@@ -5,6 +5,113 @@ import { resolve, dirname } from "path";
 import { nowISO } from "../../core/task.mjs";
 import { applyStatePatch } from "../../core/state.mjs";
 import { PlanningAgent } from "../../agents/planningAgent.mjs";
+import {
+    appendJSONL,
+    loadPlanningTranscript,
+    nextRoundFromTranscript
+} from "../../planning/transcript.mjs";
+
+async function runClarificationMiniMeeting({ tasksDir, taskId, ask }) {
+    const planningDir = resolve(tasksDir, taskId, "planning");
+    const meetingPath = resolve(planningDir, "planning.meeting.json");
+    const planningPath = resolve(planningDir, "planning.ai.json");
+    let meeting;
+    let planning;
+
+    try {
+        if (!fs.existsSync(meetingPath) || !fs.existsSync(planningPath)) return;
+        meeting = JSON.parse(fs.readFileSync(meetingPath, "utf-8"));
+        planning = JSON.parse(fs.readFileSync(planningPath, "utf-8"));
+    } catch {
+        return;
+    }
+
+    const round = Array.isArray(meeting.rounds) ? meeting.rounds[0] : null;
+    if (!round) return;
+
+    const decision =
+        round.decision ||
+        (meeting.meeting && typeof meeting.meeting.decision === "string"
+            ? meeting.meeting.decision
+            : "");
+
+    const blockingQuestions = [];
+
+    const perRole = round.per_role_verdicts || {};
+    for (const [role, verdict] of Object.entries(perRole)) {
+        if (verdict && Array.isArray(verdict.blocking_open_questions)) {
+            verdict.blocking_open_questions.forEach((q) => {
+                if (q && typeof q === "string") {
+                    blockingQuestions.push({ role, text: q });
+                }
+            });
+        }
+    }
+
+    if (!blockingQuestions.length && decision && decision !== "go") {
+        const coachOpenQs =
+            meeting.meeting && Array.isArray(meeting.meeting.open_questions)
+                ? meeting.meeting.open_questions
+                : meeting.ai_meeting && Array.isArray(meeting.ai_meeting.open_questions)
+                ? meeting.ai_meeting.open_questions
+                : [];
+        const planningOpenQs = Array.isArray(planning.open_questions)
+            ? planning.open_questions
+            : [];
+        coachOpenQs.concat(planningOpenQs).slice(0, 3).forEach((q) => {
+            if (q && typeof q === "string") {
+                blockingQuestions.push({ role: "Coach", text: q });
+            }
+        });
+    }
+
+    if (!blockingQuestions.length) return;
+
+    console.log(
+        chalk.cyan(
+            "\n[澄清小会] 部分角色认为存在必须向你确认的关键信息，敏捷教练将代为转述："
+        )
+    );
+
+    const transcriptPath = resolve(planningDir, "planning.transcript.jsonl");
+    const entries = loadPlanningTranscript(transcriptPath);
+    const clarifyRound = nextRoundFromTranscript(entries);
+
+    let index = 0;
+    for (const { role, text } of blockingQuestions) {
+        index += 1;
+        console.log("");
+        console.log(chalk.cyan(`[${role}] 的关键问题：${text}`));
+        // 用户可自由作答，不强制内容
+        const answer = await ask(chalk.cyan("> "));
+        if (!answer || !answer.trim()) continue;
+
+        appendJSONL(transcriptPath, {
+            ts: nowISO(),
+            role: "assistant",
+            kind: "clarify_question",
+            from_role: role,
+            round: clarifyRound,
+            index,
+            text
+        });
+        appendJSONL(transcriptPath, {
+            ts: nowISO(),
+            role: "user",
+            kind: "clarify_answer",
+            from_role: role,
+            round: clarifyRound,
+            index,
+            text: answer
+        });
+    }
+
+    console.log(
+        chalk.gray(
+            "\n[澄清小会] 已记录此次澄清内容。必要时你可以再次运行 /plan，让规划工作坊在新的信息基础上生成新一版规划。"
+        )
+    );
+}
 
 /**
  * /plan 命令处理：
@@ -59,6 +166,8 @@ export async function handlePlanCommand({
         if (result.statePatch) {
             applyStatePatch(tasksDir, taskId, result.statePatch);
         }
+
+        await runClarificationMiniMeeting({ tasksDir, taskId, ask });
     } catch (e) {
         console.log(chalk.red("AI 规划失败："), e.message || e);
     }

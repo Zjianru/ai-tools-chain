@@ -7,7 +7,7 @@ import {
     loadPlanningAndReview,
     buildPlanningMeetingArtifacts
 } from "../src/planning/planningMeetingCore.mjs";
-import { suggestNextFromState } from "../src/core/orchestrator.mjs";
+import { suggestNextFromState, redoPhase } from "../src/core/orchestrator.mjs";
 import { appendPlanningMemoryEntry } from "../src/planning/memory.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -506,4 +506,54 @@ test("per-role RiskPlanner high-confidence not ok biases decision to hold", asyn
         md.includes("风险视角：RiskPlanner 认为存在未解决的高风险或信息黑洞。"),
         "md should contain RiskPlanner soft gate hint"
     );
+});
+
+test("redoPhase planning snapshots current planning artifacts into versions", async () => {
+    const baseDir = resolve(__dirname, "..", ".tmp-tests", "redo-planning");
+    fs.removeSync(baseDir);
+
+    const taskId = "task-redo";
+    const { tasksDir, taskDir, planningDir } = createFakeTaskDir(baseDir, taskId);
+
+    const statePath = resolve(taskDir, "state.json");
+    const state = {
+        task_id: taskId,
+        phase: "planning_done",
+        actors: {
+            planning: { status: "completed", round: 1 }
+        },
+        artifacts: {}
+    };
+    fs.ensureDirSync(dirname(statePath));
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+
+    const files = [
+        ["planning.ai.json", JSON.stringify({ meta: { title: "V1" } }, null, 2)],
+        ["plan.md", "# plan v1\n"],
+        ["plan-review.json", JSON.stringify({ ok: true }, null, 2)],
+        ["plan-review.md", "# plan review\n"],
+        ["planning.meeting.json", JSON.stringify({ rounds: [{ round: 1, per_role_verdicts: {} }] }, null, 2)],
+        ["planning.meeting.md", "# meeting\n"]
+    ];
+    files.forEach(([name, content]) =>
+        fs.writeFileSync(resolve(planningDir, name), content, "utf-8")
+    );
+
+    const reportsDir = resolve(tasksDir, taskId, "reports", "planning", "v1");
+    fs.ensureDirSync(reportsDir);
+    fs.writeFileSync(resolve(reportsDir, "planning.report.md"), "report v1", "utf-8");
+    const latestDir = resolve(tasksDir, taskId, "reports", "planning", "latest");
+    fs.ensureDirSync(latestDir);
+    fs.writeFileSync(resolve(latestDir, "planning.report.md"), "report v1", "utf-8");
+
+    const newState = redoPhase(tasksDir, taskId, "planning");
+    assert.equal(newState.actors.planning.round, 2);
+    assert.equal(newState.phase, "planning");
+
+    const versionDir = resolve(planningDir, "versions", "v1");
+    assert.ok(fs.existsSync(versionDir));
+    assert.ok(fs.existsSync(resolve(versionDir, "planning.ai.json")));
+    assert.ok(fs.existsSync(resolve(versionDir, "plan.md")));
+    assert.ok(fs.existsSync(resolve(versionDir, "planning.meeting.json")));
+    assert.ok(fs.existsSync(resolve(versionDir, "planning.report.md")));
 });

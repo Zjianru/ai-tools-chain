@@ -95,9 +95,6 @@ export async function runRepl(cwd) {
             rl.prompt();
         });
 
-    // 标记当前是否处于“规划工作坊”对话模式
-    let currentInteraction = null;
-
 
     rl.on("line", async (lineRaw) => {
         if (askResolver) {
@@ -123,7 +120,6 @@ export async function runRepl(cwd) {
             }
             if (cmd === "/plan") {
                 await handlePlanCommand({ lineRaw, cwd, aiDir, tasksDir, taskId, metaPath, cfg, ask });
-                currentInteraction = "planning";
                 return;
             }
 
@@ -224,42 +220,36 @@ export async function runRepl(cwd) {
                 } catch (e) {
                     console.log(chalk.red("计划审查失败："), e.message || e);
                 }
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/codegen") {
                 await handleCodegenCommand({ line, cfg, cwd, aiDir, tasksDir, taskId, metaPath, ask });
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/review") {
                 await handleReviewCommand({ cwd, aiDir, tasksDir, taskId, cfg });
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/accept") {
                 await handleAcceptCommand({ cwd, aiDir, tasksDir, taskId, metaPath, cfg, ask });
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/revert") {
                 await handleRevertCommand({ cwd, tasksDir, taskId, metaPath, ask });
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
 
             if (cmd === "/eval") {
                 await handleEvalCommand({ cwd, aiDir, tasksDir, taskId, ask });
-                currentInteraction = null;
                 rl.prompt();
                 return;
             }
@@ -272,38 +262,15 @@ export async function runRepl(cwd) {
         const masked = mask(line);
         appendJSONL(tlog, { ts: nowISO(), role: "user", text: masked, stage: "draft" });
 
-        // 如果当前处于规划工作坊模式，则将用户自然语言输入追加到 planning.transcript.jsonl
-        if (currentInteraction === "planning") {
-            try {
-                const planningTranscript = resolve(
-                    tasksDir,
-                    taskId,
-                    "planning",
-                    "planning.transcript.jsonl"
-                );
-                appendJSONL(planningTranscript, {
-                    ts: nowISO(),
-                    role: "user",
-                    kind: "brief",
-                    text: masked
-                });
-            } catch {
-                // best-effort，失败时忽略
-            }
-        }
-
-        const dict = (cfg?.confirm?.fallback_dict || "")
-            .split(",").map((s) => s.trim()).filter(Boolean);
-        if (dict.length > 0) {
-            const hit = dict.some((w) => masked.includes(w));
-            if (hit) {
-                const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
-                meta.status = "pending_confirm";
-                writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-                console.log(chalk.green("检测到强确认关键词（来自 fallback_dict）。下一步将进入 codegen。"));
-            }
-        } else {
-            console.log(chalk.gray("提示：如需本地关键词强确认，请在 toolchain.conf 的 [confirm].fallback_dict 中添加词汇（逗号分隔）。"));
+        try {
+            const coachReply = handleCoachDialogue({ tasksDir, taskId, userText: masked });
+            console.log(chalk.cyan(`Coach：${coachReply}`));
+        } catch (e) {
+            console.log(
+                chalk.yellow(
+                    `Coach 暂时无法响应，请先运行 /plan 或检查规划产物。原因：${e.message || e}`
+                )
+            );
         }
 
         rl.prompt();
@@ -313,4 +280,85 @@ export async function runRepl(cwd) {
         console.log(chalk.gray(`会话已保存：.ai-tools-chain/tasks/${taskId}/transcript.jsonl`));
         process.exit(0);
     });
+}
+
+function handleCoachDialogue({ tasksDir, taskId, userText }) {
+    const planningDir = resolve(tasksDir, taskId, "planning");
+    fs.ensureDirSync(planningDir);
+    const meetingPath = resolve(planningDir, "planning.meeting.json");
+    const planningPath = resolve(planningDir, "planning.ai.json");
+    const transcriptPath = resolve(planningDir, "planning.transcript.jsonl");
+
+    const now = nowISO();
+    appendJSONL(transcriptPath, {
+        ts: now,
+        role: "user",
+        kind: "coach_dialogue_user",
+        text: userText
+    });
+
+    if (!existsSync(meetingPath) || !existsSync(planningPath)) {
+        const reply = "目前还没有可用的规划结果，请先执行 /plan。";
+        appendJSONL(transcriptPath, {
+            ts: nowISO(),
+            role: "assistant",
+            kind: "coach_dialogue_assistant",
+            text: reply
+        });
+        return reply;
+    }
+
+    const meeting = JSON.parse(readFileSync(meetingPath, "utf-8"));
+    const planning = JSON.parse(readFileSync(planningPath, "utf-8"));
+
+    const round = Array.isArray(meeting.rounds) ? meeting.rounds[0] : null;
+    const decision =
+        (round && round.decision) ||
+        (meeting.ai_meeting && meeting.ai_meeting.decision) ||
+        (meeting.ok ? "go" : "hold");
+    const summary =
+        (meeting.ai_meeting && meeting.ai_meeting.summary) ||
+        (round && round.coach_summary) ||
+        "";
+    const nextActions =
+        (meeting.ai_meeting && Array.isArray(meeting.ai_meeting.next_actions)
+            ? meeting.ai_meeting.next_actions
+            : []) || [];
+    const openQuestions =
+        (meeting.ai_meeting && Array.isArray(meeting.ai_meeting.open_questions)
+            ? meeting.ai_meeting.open_questions
+            : []) || [];
+    const planningOpen = Array.isArray(planning.open_questions) ? planning.open_questions : [];
+
+    const lines = [];
+    lines.push(`当前决策：${decision}`);
+    if (summary) lines.push(`摘要：${summary}`);
+
+    if (nextActions.length) {
+        lines.push("下一步建议：");
+        nextActions.slice(0, 3).forEach((a, idx) => {
+            lines.push(`  ${idx + 1}. ${a}`);
+        });
+    }
+
+    const pendingQuestions = [...openQuestions, ...planningOpen];
+    if (pendingQuestions.length) {
+        lines.push("仍待澄清的问题：");
+        pendingQuestions.slice(0, 3).forEach((q, idx) => {
+            lines.push(`  ${idx + 1}. ${q}`);
+        });
+    }
+
+    if (!nextActions.length && !pendingQuestions.length && !summary) {
+        lines.push("当前规划已准备就绪，如需更新，可直接补充信息后再次运行 /plan。");
+    }
+
+    const reply = lines.join("\n");
+    appendJSONL(transcriptPath, {
+        ts: nowISO(),
+        role: "assistant",
+        kind: "coach_dialogue_assistant",
+        text: reply
+    });
+    return reply;
 }
