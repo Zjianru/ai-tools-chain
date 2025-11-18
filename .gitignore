@@ -1,7 +1,6 @@
 /playgrounds/*
 node_modules/
 .DS_Store
-/docs
 .claude
 .tmp-tests
 .github

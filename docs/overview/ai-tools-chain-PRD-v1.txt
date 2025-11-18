@@ -1,0 +1,216 @@
+AI Tools Chain — PRD v1（共识版） & 配置草案
+========================================
+
+【说明】
+本文件为“应该怎样”的产品规范与配置草案，用于指导后续实现与验收。包含：
+1) PRD v1（目标/交互/Task 生命周期/Git 策略/写入与危险操作/评测/日志归档/模型与插件）
+2) 配置文件草案（toolchain.conf / eval.conf / plugins.conf）
+3) 目录与资产结构、命令面与风险分级展示建议
+
+
+一、PRD v1（共识版）
+------------------
+1) 目标与边界
+- 在任意业务仓库内，以“终端 REPL + VS Code Tasks”方式工作。
+- 对话驱动，只有识别到“强确认”后才写代码。
+- 每次从澄清到评测的完整过程叫一个 Task；所有过程性资产只落在本地隐藏目录 .ai-tools-chain/，从不上传。
+- 默认支持任意语言的业务项目；工具链自身以 Node CLI 为主、Python 评测为辅（后续可加本地模型）。
+
+2) 交互模型
+- 强确认由可配置模型（默认 OpenAI 兼容接口）来判定；若置信度不足 → 一律提示用户明确确认。
+- 强确认目前仅中文；REPL 会话是否恢复：询问用户，或由配置决定。
+- “第二意见”在 plan 与 review 阶段插入；默认“建议不阻断”，当风险为“中/高”才要求再次确认；其日志独立于 task。
+
+3) Task 生命周期（有限状态机）
+draft → clarify → plan → pending_confirm → codegen → review → eval → done/redo
+- clarify：补齐签名/边界/风格/文件清单。
+- plan：输出“将改动文件列表与要点”（不写入），并生成第二意见。
+- pending_confirm：等待用户明确“确认生成 / 开始生成 / code gen …”。
+- codegen：先做 pre-commit 快照（脏工作区禁止继续），必要时按配置创建 per-task 分支；随后写入。
+- review：展示 git diff、风险清单与第二意见；允许“选择性应用”。
+- eval：按用户选择运行 lint/test/promptfoo/Ragas 等；需用户手动确认才执行。
+- redo/done：失败则复盘并询问“放弃/继续/回滚”；成功则产出摘要并归档。
+
+4) Git 策略
+- pre-commit 必做；禁止在脏工作区强行继续。
+- per-task 分支：按配置开启；分支名默认可读：<type>/<slug>-task-<taskid>
+  例：feat/import-cleanup-task-20251112-001
+- 提交身份：使用用户本人的 git 配置；我们只在 commit message 里标注 task 信息。
+- 冲突：无论是 Git 合并冲突，还是“同文件被另一未合并 task 修改”，都视为冲突；停在 review，征得同意才写入/继续。
+
+5) 写入与危险操作
+- 白名单可配置；默认允许新增与修改，禁止删除（删除需理由+影响评估+二次确认）。
+- 危险路径默认集（可改）：infra/, .github/, deploy/, k8s/, secrets/, Dockerfile*, scripts/release/, Makefile —— 进入即二次确认。
+- 大改动阈值（默认，可配）：单次 > 10 文件或 > 1000 行 需要再次确认。
+- 实际写入前：总会先给“计划清单 + 将改动的文件列表”。
+
+6) 评测（eval）
+- 有独立的 eval 配置文件；默认全开（文件为空即全开），用户在文件内按块关闭某些检查（MySQL conf 风格）。
+- 执行时机：用户手动确认后再跑（建议在 review 后）。
+- 缺少依赖（如 Python/Ragas）：停止动作并提示用户自行安装（不自动安装）。
+- 失败后：结合日志说明失败环节，询问是否沿用上一次成果继续/放弃/回滚；业务代码只在“确认写入”点落盘。
+
+7) 日志、归档与隐私
+- .ai-tools-chain/ 作为唯一事实来源：
+  - tasks/<taskid>/（对话 transcript、plan、patch.json、diff.patch、files/*.full、eval-report*、meta.json）
+  - second-opinion/<taskid>/（独立存放第二意见日志）
+  - config/, rules/, memory/, logs/ …
+- 定时扫描：默认每日 1 次提醒留存量（时区按用户配置）；每 7 天对隐藏目录做一次整体快照压缩，并立即清理原始目录。
+- 脱敏：日志与对话中对疑似密钥/令牌/敏感键值做掩码；可在配置中扩展/忽略规则。
+- 无任何远端遥测；仅业务代码进入 Git。
+
+8) 模型/调用路径
+- MVP 直接内置一个统一 API 调用路径（默认走 OpenAI 兼容接口）；模型由用户在配置中声明。
+- 本地模型（Ollama 等）为后续升级方向；现阶段不纳入 MVP。
+
+9) 插件体系
+- 必做；不采用“能力包”分级，改为“意向配置 + 执行顺序”。
+- Hook（示例）：pre_clarify, post_clarify, pre_plan, post_plan, pre_write, post_write, pre_eval, post_eval, on_conflict, on_error …
+- 短路策略可配：任一插件拒绝即阻断 / 仅告警不阻断。
+
+
+二、配置文件草案
+----------------
+
+1) 主配置：.ai-tools-chain/config/toolchain.conf（INI 风格）
+---------------------------------------------------------
+[system]
+locale = zh_CN
+timezone = Asia/Shanghai
+auto_resume = ask            ; ask|always|never —— REPL 会话恢复策略
+data_root = .ai-tools-chain  ; 隐藏目录
+
+[model]
+provider = openai
+model = gpt-4o-mini
+endpoint =                   ; 可留空，走默认
+api_key_env = OPENAI_API_KEY
+
+[task]
+id_format = YYYYMMDD-HHMM-###             ; 可读性优先
+per_task_branch = false                    ; 是否每个 task 建分支
+branch_pattern = {type}/{slug}-task-{id}
+types = feat,fix,refactor,chore,test,docs,perf
+dangerous_paths = infra/, .github/, deploy/, k8s/, secrets/, Dockerfile*, scripts/release/, Makefile
+max_files = 10                             ; 大改动阈值（文件数）
+max_lines = 1000                           ; 大改动阈值（行数）
+allow_delete = false                       ; 删除默认禁止，需二次确认
+write_whitelist = *                        ; 默认全仓库允许写；可换成逗号分隔目录
+
+[confirm]
+language = zh                              ; 仅中文
+strategy = model                           ; 交给模型判断强确认
+fallback_dict =                            ; 留空：完全交给模型；可选填“确认生成,开始生成,code gen,应用计划”
+
+[eval]                                      ; 指向 eval.conf 的位置
+config = .ai-tools-chain/config/eval.conf
+
+[second_opinion]
+enabled = true
+max_sources = 1                             ; 默认只用一个来源（可增）
+risk_levels = low,medium,high,critical
+block_on = medium,high,critical             ; 中高风险触发再次确认
+storage = .ai-tools-chain/second-opinion
+
+[schedule]
+daily_scan = true
+daily_scan_time = 02:00                     ; 本地时区
+weekly_snapshot = true
+weekly_snapshot_day = Sun
+snapshot_encrypt = false                    ; 可选：后续支持口令压缩
+
+[privacy]
+mask_patterns = sk-[A-Za-z0-9_-]{20,}, AKIA[0-9A-Z]{16}, password\s*=\s*.+, api[_-]?key\s*=\s*.+, secret\s*=\s*.+
+
+
+2) 评测配置：.ai-tools-chain/config/eval.conf（INI；空文件=全部开启）
+-------------------------------------------------------------------
+# 空文件 == 全部开启
+# 需要“关闭某项”时，才写对应块与键
+
+[lint]
+enabled = true
+cmd = npm run lint || ruff .
+
+[test]
+enabled = true
+cmd = npm test || pytest -q
+
+[promptfoo]
+enabled = true
+config = .ai-tools-chain/promptfoo/promptfooconfig.yaml
+
+[ragas]
+enabled = true
+entry = python .ai-tools-chain/ragas/evaluate_summarizer.py
+# 如果缺 Python 或依赖：工具停止并提示用户安装（不自动安装）
+
+[custom]
+# 你也可以扩展自定义块
+# enabled = false
+# cmd = ./scripts/my-extra-check.sh
+
+
+3) 插件顺序与短路策略：.ai-tools-chain/config/plugins.conf
+---------------------------------------------------------
+[pre_write]
+order = policy-guard,secret-scan,size-limit
+short_circuit = true         ; 任一插件拒绝即阻断（可改为 false 表示仅告警）
+
+[post_write]
+order = formatter,metadata
+
+[pre_eval]
+order = env-check
+
+[on_conflict]
+order = notify
+
+
+三、目录与资产结构（草案）
+-------------------------
+.ai-tools-chain/
+  config/
+    toolchain.conf
+    eval.conf
+    plugins.conf
+  rules/
+    system.md
+  memory/
+    project.json
+  tasks/
+    20251112-001/
+      transcript.jsonl
+      plan.md
+      patch.json
+      diff.patch
+      files/
+        src/xxx.full
+      eval-report.json
+      meta.json
+  second-opinion/
+    20251112-001/
+      analysis.md
+      risks.json
+  logs/
+  promptfoo/
+  ragas/
+
+
+四、命令面（应该有）
+-------------------
+- ai-tools repl：进入对话；支持强确认、/命令（/plan、/review、/codegen、/eval、/quit）。
+- ai-tools task new|list|open <id>：Task 管理。
+- ai-tools eval：按 eval.conf 执行（需二次确认）。
+- ai-tools maintain：执行每日扫描与周快照（按 schedule）。
+- ai-tools doctor：依赖体检（不自动安装，只给建议）。
+
+
+五、风险分级展示（建议）
+-----------------------
+- low：普通文本
+- medium：黄色高亮（!）
+- high：红色加粗（!!），需再次确认
+- critical：红底反白（!!!），强制确认或中止
+
+（完）
