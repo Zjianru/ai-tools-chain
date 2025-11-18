@@ -15,7 +15,7 @@
 ---
 
 > 说明：关于规划阶段（/plan）与规划工作坊的最新行为/角色/澄清策略，  
-> 请优先以 `docs/architecture/PLANNING-WORKSHOP-DESIGN-2025-11-17.md` 为准；本文件中的相关描述如有出入，以该总纲为准。  
+> 请优先以 [docs/02-architecture/10-planning-workshop-design.md](../02-architecture/10-planning-workshop-design.md) 为准；本文件中的相关描述如有出入，以该总纲为准。  
 > 这是一份面向“下一位助手/贡献者”的交接文档，补充说明当前（2025-11-15）仓库状态、已完成工作、待办事项与优先级，以及相关协议文档。  
 > 请优先配合阅读：
 > - `docs/architecture/pipeline-artifacts-and-contracts.md`

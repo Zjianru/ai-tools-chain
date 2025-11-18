@@ -36,7 +36,7 @@
 
 在动任何代码或协议前，必须优先阅读以下文档——它们是当前设计的「法律文本」（如有冲突，以本列表中排列靠前者为准）：
 
-1. `docs/architecture/PLANNING-WORKSHOP-DESIGN-2025-11-17.md`  
+1. [docs/02-architecture/10-planning-workshop-design.md](../02-architecture/10-planning-workshop-design.md)  
    - 统一描述 `/plan` 的用户旅程、“规划工作坊”内部协作、敏捷教练/传声筒澄清机制、多版本规划与规划报告的目标形态。
 2. `docs/architecture/planning-schema-and-prompt.md`  
   - 定义 **planning.ai.json 的新 schema**：  

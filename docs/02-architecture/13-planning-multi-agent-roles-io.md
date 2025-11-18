@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| **最后更新** | 2025-11-17 |
+| **最后更新** | 2025-11-18 |
 | **版本** | v1.0 |
 | **状态** | ✅ Current |
 
@@ -15,7 +15,7 @@
 ---
 
 > 说明：本文件定义各规划角色与 Coach 的 I/O 协议。  
-> 如本文件与 `PLANNING-WORKSHOP-DESIGN-2025-11-17.md` 在整体流程或澄清策略上存在不一致，以后者为准。  
+> 如本文件与 [10-planning-workshop-design.md](./10-planning-workshop-design.md) 在整体流程或澄清策略上存在不一致，以后者为准。  
 > 目标：为规划工作坊内部的每个角色（Product/System/SeniorDev/Test/Risk/Coach）定义清晰的输入/输出协议，  
 > 为后续拆成独立 Agent 做准备。当前实现仍主要通过 `planning` / `planning_meeting` 单次调用模拟多角色，  
 > 本文档是“下一步拆分”的设计草案，部分字段尚未在代码中完全落地。

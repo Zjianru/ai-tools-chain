@@ -15,7 +15,7 @@
 ---
 
 > 说明：关于规划阶段（/plan）的人机交互、规划工作坊行为与澄清策略，  
-> 如本文件与 `PLANNING-WORKSHOP-DESIGN-2025-11-17.md` 存在不一致，以后者为准。  
+> 如本文件与 [10-planning-workshop-design.md](./10-planning-workshop-design.md) 存在不一致，以后者为准。  
 > 目的：为后续开发者和“对接手册”提供统一的参照，明确在各个阶段（planning / plan_review / codegen / review）：
 > - 期望的产物（artifacts）有哪些、放在哪里；
 > - 给 AI 的输入是什么、期望 AI 输出什么结构；
