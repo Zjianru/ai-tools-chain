@@ -36,7 +36,7 @@ Implement a **Planning MVP** for AI Tools Chain that:
   - `planning/planning.ai.json`
   - `planning/plan.md`
   - `planning/plan.files.json`
-- Documenting planning phase and state machine in docs_v2.
+- Documenting planning phase and state machine in docs.
 
 ### Out of scope
 
@@ -83,10 +83,10 @@ Implement a **Planning MVP** for AI Tools Chain that:
 
 | path                                      | intent           | role | summary                                   |
 |-------------------------------------------|------------------|------|-------------------------------------------|
-| docs_v2/system/phases/planning.md        | create_or_update | doc  | Document the planning phase.              |
-| docs_v2/system/workflows/planning-state-machine.md | create_or_update | doc  | Define planning state machine.            |
-| docs_v2/system/schemas/planning-schema.md | create_or_update | doc  | Specify planning.ai.json schema.          |
-| docs_v2/system/schemas/planning-meeting-schema.md | create_or_update | doc  | Specify planning transcript schema.       |
-| docs_v2/planning/examples/example-plan.md | create_or_update | doc  | Provide a sample human-readable plan.     |
+| docs/system/phases/planning.md        | create_or_update | doc  | Document the planning phase.              |
+| docs/system/workflows/planning-state-machine.md | create_or_update | doc  | Define planning state machine.            |
+| docs/system/schemas/planning-schema.md | create_or_update | doc  | Specify planning.ai.json schema.          |
+| docs/system/schemas/planning-meeting-schema.md | create_or_update | doc  | Specify planning transcript schema.       |
+| docs/planning/examples/example-plan.md | create_or_update | doc  | Provide a sample human-readable plan.     |
 
 The equivalent JSON representation would live in `planning.ai.json` as `file_plan`.

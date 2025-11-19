@@ -212,7 +212,7 @@ Examples:
 
 Implementation
 	•	Agents: src/agents/*.mjs
-	•	Matching docs: docs_v2/system/agents/*.md
+	•	Matching docs: docs/system/agents/*.md
 
 The rationale for multi-agent architecture is in ADR 0002.
 
@@ -246,7 +246,7 @@ Implementation
 	•	Broker & role handling: src/models/broker.mjs
 	•	Provider adapters: src/models/providers/*.mjs
 	•	Role prompts and instructions: src/models/prompts/**/*
-	•	Provider-independent schemas: docs_v2/system/schemas/
+	•	Provider-independent schemas: docs/system/schemas/
 
 ⸻
 
@@ -319,8 +319,8 @@ With possible regressions:
 	•	accept → revert
 
 Details:
-	•	Phases: docs_v2/system/phases/*.md
-	•	Workflows: docs_v2/system/workflows/*.md
+	•	Phases: docs/system/phases/*.md
+	•	Workflows: docs/system/workflows/*.md
 
 ⸻
 
@@ -344,7 +344,7 @@ The architecture follows these principles:
 	•	Phases are explicit, not implicit side-effects.
 
 If a contributor wants to change behavior, they should:
-	•	update the relevant docs under docs_v2/,
+	•	update the relevant docs under docs/,
 	•	adjust orchestrator / agents / schemas accordingly,
 	•	keep the system coherent at the architectural level.
 

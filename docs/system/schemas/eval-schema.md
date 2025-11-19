@@ -1,5 +1,13 @@
-
 # Schema: Evaluation Report (eval-report.json)
+
+> **Implementation status**
+> - Status: Implemented with different path
+> - Code: `src/core/eval.mjs`, `src/agents/testAgent.mjs`
+> - Current path: `.ai-tools-chain/tasks/<id>/eval-report.json`
+> - Target path (design): `.ai-tools-chain/tasks/<id>/eval/eval-report.json`
+> - TODO:
+>   - Update code to use `eval/eval-report.json`, or
+>   - Update this schema to accept both paths during migration.
 
 This document defines the structure of the **evaluation report** written to:
 

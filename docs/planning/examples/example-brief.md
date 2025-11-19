@@ -16,7 +16,6 @@ end-to-end for a single task.
 Right now, the project has:
 
 - some agents and CLI commands,
-- some legacy docs under `docs/`,
 - but no clear, single source of truth for planning artifacts and workflow.
 
 We need to:
@@ -40,4 +39,4 @@ After running the planning phase for a task, we should have:
 
 - artifacts should live under:
   - `.ai-tools-chain/tasks/<id>/planning/`
-  - and conform to the schemas in `docs_v2/system/schemas/`.
+  - and conform to the schemas in `docs/system/schemas/`.

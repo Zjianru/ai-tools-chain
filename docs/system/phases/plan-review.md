@@ -42,7 +42,7 @@ The plan review phase should:
   - `planning/brief.md`
   - `planning/meeting.jsonl`
 - Timeline row:
-  - from `docs_v2/planning/timeline.md`
+  - from `docs/planning/timeline.md`
 - Repo context, if relevant:
   - summary of the current codebase.
 
@@ -86,8 +86,18 @@ Under the task directory:
 
 Schemas:
 
-- `docs_v2/system/schemas/plan-review-schema.md` (to be kept in sync).
+- `docs/system/schemas/plan-review-schema.md` (to be kept in sync).
+- `planning/plan-review.json`  (current implementation)
+- **Target:** eventually migrate to `review/plan-review.json`
+  to keep all review artifacts in a dedicated folder.
 
+
+> **Implementation status**
+> - Status: Implemented (under `planning/`)
+> - Code: `src/agents/planReviewAgent.mjs` (and related helpers)
+> - Migration:
+>   - When directory restructuring is implemented (see ADR 0001),
+>     move this artifact to `review/plan-review.json`.
 ---
 
 ## 5. State machine

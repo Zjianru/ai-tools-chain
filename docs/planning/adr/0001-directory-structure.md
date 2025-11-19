@@ -34,13 +34,29 @@ This caused:
 
 All task artifacts MUST live under a **single root folder**:
 
+```TEXT
 .ai-tools-chain/tasks//
+```
 
 This folder is:
 
 - **private** (ignored by Git unless the user opts in),
 - **isolated** (per-task),
 - **structured** (subfolders per phase).
+
+> **Implementation status**
+> - Status: Partially implemented
+> - Implemented:
+>   - `planning/` directory with `planning.ai.json`, `plan.md`, `plan-review.json`, etc.
+> - Not yet implemented:
+>   - `review/`, `code/`, `eval/`, `accept/`, `revert/` subdirectories.
+> - Current behavior:
+>   - `eval-report.json` lives at task root (see `src/core/eval.mjs`).
+>   - Plan review JSON lives under `planning/` (see planning agents).
+> - Migration plan:
+>   - Gradually move artifacts into phase-specific subdirectories as
+>     implementations catch up.
+
 
 ### Structure
 
@@ -90,6 +106,19 @@ Each phase owns its own subfolder, and writes only within it.
 
 - Some users may initially be confused why files appear “outside the repo”.
 - Integrating with Git or remote tooling requires wrappers.
+
+> **Implementation status**
+> - Status: Partially implemented
+> - Implemented:
+>   - `planning/` directory with `planning.ai.json`, `plan.md`, `plan-review.json`, etc.
+> - Not yet implemented:
+>   - `review/`, `code/`, `eval/`, `accept/`, `revert/` subdirectories.
+> - Current behavior:
+>   - `eval-report.json` lives at task root (see `src/core/eval.mjs`).
+>   - Plan review JSON lives under `planning/` (see planning agents).
+> - Migration plan:
+>   - Gradually move artifacts into phase-specific subdirectories as
+>     implementations catch up.
 
 ---
 

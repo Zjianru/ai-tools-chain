@@ -117,3 +117,25 @@ The orchestrator uses review artifacts to decide:
   - Handling:
     - tune reviewer roles,
     - filter by severity.
+    ---
+
+## 7. Implementation status
+
+- Status：🟡 partial
+- 当前实现：
+  - `src/agents/reviewAgent.mjs` 已实现核心 review 流程：
+    - 读取 `code/diff.patch`、`code/files/`；
+    - 结合 `planning/plan.md` 和（可选）`planning/planning.ai.json` 做范围检查；
+    - 调用模型生成 review 结果、second opinion，并在 REPL 中展示摘要。
+  - REPL 的 `/review` 命令会：
+    - 展示 diff 摘要与危险路径；
+    - 输出第二意见与审查摘要；
+    - 更新 task state 中 `phase = "code_review"` 与 `actors.review.status = "completed"`。
+- 与文档差异：
+  - 文档约定的 `review/code-review.json` 与 `review/code-review.md` 目前尚未写入磁盘；
+  - review 输出主要存在于 REPL 日志与内部结构中。
+- 下一步：
+  - 在 ReviewAgent 内补一个 artifacts 写入层：
+    - 规范 `review/code-review.json` 的 schema（见 `system/schemas/`，未来增加 `code-review-schema.md`）；
+    - 同步生成 `review/code-review.md` 作为人类可读摘要；
+  - 在 `timeline` 中增加对 review 结果的可选链接（例如 `notes` 或附属列）。

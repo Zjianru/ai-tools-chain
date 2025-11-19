@@ -9,10 +9,3 @@
 
 ## PlanningAgent {#planning-agent}
 - 见 ../agents/planning-agent.md#overview
-
-## 参考旧文档（整合要点）{#legacy-refs}
-- `02-architecture/02-agents-architecture.md`：整体架构与角色关系
-- `04-agents/01-agents-orchestrator-checklist.md`：Orchestrator 检查清单
-- `04-agents/02-agents-todo-midterm.md`：中期 TODO 与验收条目
-- `04-agents/03-handover.md`：交接说明
-- `04-agents/04-next-assistant-prompt.md`：后续助手系统 Prompt

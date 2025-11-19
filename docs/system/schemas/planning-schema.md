@@ -10,6 +10,11 @@ PlanningAgent.
 
 plan.md and plan.files.json are projections derived from this JSON.
 
+> **Implementation note**
+> - The `TestAgent` (`src/agents/testAgent.mjs`) consumes `planning.test_plan`
+>   to print a test strategy summary before running evaluations.
+> - This creates a direct link between planning and the test phase.
+
 ⸻
 
 1. Top-level shape
@@ -76,7 +81,7 @@ All sections are described below.
   "milestone": "M1: Planning MVP",
   "priority": "P0",
   "depends": ["TASK-0001", "TASK-0002"],
-  "timeline_ref": "docs_v2/planning/timeline.md#TASK-001",
+  "timeline_ref": "docs/planning/timeline.md#TASK-001",
   "notes": "Any extra high-level context."
 }
 ```
@@ -151,6 +156,7 @@ Each entry:
   "notes": "Any extra notes."
 }
 ```
+
 Fields:
 	•	id (string, required) – local task ID (within this plan).
 	•	title (string, required)
@@ -163,6 +169,7 @@ Fields:
 	•	notes (string, optional).
 
 6.2 work.milestones (array, optional)
+
 ```json
 {
   "id": "M1",
@@ -182,6 +189,7 @@ Fields:
 7. risks (array)
 
 Each risk entry:
+
 ```json
 {
   "id": "R1",
@@ -204,6 +212,7 @@ Fields:
 ⸻
 
 8. assumptions (array)
+
 ```json
 {
   "id": "A1",
@@ -211,6 +220,7 @@ Fields:
   "status": "open"
 }
 ```
+
 Fields:
 	•	id (string)
 	•	description (string, required)
@@ -219,6 +229,7 @@ Fields:
 ⸻
 
 9. acceptance_criteria (array)
+
 ```json
 {
   "id": "AC1",
@@ -226,6 +237,7 @@ Fields:
   "must_have": true
 }
 ```
+
 Fields:
 	•	id (string)
 	•	description (string, required)
@@ -238,15 +250,17 @@ These map directly to what the accept phase will check.
 10. file_plan (array)
 
 Each entry describes intended changes at the file level.
+
 ```json
 {
-  "path": "docs_v2/system/phases/planning.md",
+  "path": "docs/system/phases/planning.md",
   "intent": "create_or_update",
   "role": "doc",
   "summary": "Document the planning phase.",
   "notes": "Align with planning-schema.md"
 }
 ```
+
 Fields:
 	•	path (string, required) – relative file path.
 	•	intent (enum, required) – e.g. create, update, delete, create_or_update.
@@ -259,6 +273,7 @@ This is the main input for the codegen phase regarding scope.
 ⸻
 
 11. notes (array, optional)
+
 ```json
 {
   "id": "N1",
@@ -266,6 +281,7 @@ This is the main input for the codegen phase regarding scope.
   "text": "Should timeline be auto-updated by the CLI?"
 }
 ```
+
 Fields:
 	•	id (string)
 	•	kind (string) – e.g. open_question, decision, background.
@@ -285,3 +301,41 @@ If validation fails, PlanningAgent should:
 	•	surface errors,
 	•	and either re-prompt the model or ask the user to fix the plan manually.
 
+### X. test_plan (object, optional)
+
+> 测试计划：由规划阶段给 Test Phase 提供的“期望测试范围”。
+
+- `strategy` (string, optional)
+  - 总体测试策略描述，如 “单元测试覆盖核心用例 + 简单集成测试”。
+- `cases[]` (string[], optional)
+  - 关键测试用例的自然语言描述。
+- `automation` (string, optional)
+  - 自动化程度说明，例如 “仅手工测试” / “必须有自动化” / 指定框架等。
+
+实现备注（Implementation note）：
+
+- PlanningAgent 在生成 `planning.ai.json` 时会同时生成 `test_plan`；
+- `plan.md` / 规划报告会根据 `test_plan` 生成 “Test Plan / 测试计划摘要” 小节；
+- Test 阶段后续将使用该部分来决定：
+  - 哪些测试必须存在；
+  - 哪些用例可以作为 promptfoo / E2E 的输入。
+
+---
+
+### Y. memory / meeting.jsonl 衍生文件
+
+虽然 `meeting.jsonl` 的 schema 已在 `planning-meeting-schema.md` 中定义，但项目还会使用一个**规划记忆文件**来记录跨轮次信息，例如：
+
+- `planning.memory.jsonl`（名称可调整，以实际实现为准）。
+
+该文件用于：
+
+- 存储教练总结、风险聚合、跨轮次信号；
+- 为下一轮规划、后续 review / accept 提供上下文。
+
+实现备注（Implementation note）：
+
+- `src/planning/memory.mjs` 负责读写该文件；
+- 目前该机制已在代码中试验性使用，但文档只要求：
+  - memory 文件是 **附加的**（可选）；
+  - 不作为唯一真相源，SSOT 仍是 `planning.ai.json` 与 `plan.md`。

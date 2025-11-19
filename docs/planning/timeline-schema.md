@@ -19,7 +19,7 @@ project. It MUST follow this schema.
 
 The canonical timeline file lives in:
 
-docs_v2/planning/timeline.md
+docs/planning/timeline.md
 
 The timeline MAY contain additional human-readable text, but at least one table
 must conform to the schema below.
@@ -197,7 +197,7 @@ Changes to:
 
 MUST go through an ADR under:
 
-docs_v2/planning/adr/
+docs/planning/adr/
 
 The timeline schema is versioned implicitly via ADRs, not through a version
 number embedded in the file.

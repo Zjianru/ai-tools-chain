@@ -17,4 +17,3 @@
 ## 叙事 {#narrative}
 
 
-### 参考旧文档（整合要点）{#legacy-refs}

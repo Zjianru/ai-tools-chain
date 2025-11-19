@@ -2,19 +2,9 @@
 
 This document set exists because the project grew from a **“cool local CLI”** into a
 **small but opinionated system for AI-assisted software delivery**.
-
-The legacy docs (under `docs/`) captured a lot of design thinking, TODOs and
-process notes, but they were:
-
-- difficult to _navigate_ (many scattered notes),
-- hard to _keep in sync_ with the evolving code,
-- and not _machine–friendly_ (schemas, contracts and workflows were implicit).
-
-The goal of `docs_v2/` is to fix that.
-
 ---
 
-## Goals of `docs_v2`
+## Goals of `docs`
 
 1. **Single source of truth for the system design**
 
@@ -69,21 +59,3 @@ The goal of `docs_v2/` is to fix that.
 3. Check `roadmap.md` for planned extensions that might affect your integration.
 
 ---
-
-## Migration from legacy docs
-
-The legacy `docs/` directory still contains valuable material:
-
-- Deep-dive design discussions,
-- Scattered TODOs,
-- Historical notes about early iterations.
-
-As we migrate content into `docs_v2/`, we aim to:
-
-- **Extract** stable designs and contracts into `system/` and `planning/`,
-- **Summarize** relevant long-form reasoning as ADRs,
-- **Centralize** open TODOs in `roadmap.md`.
-
-If you find an inconsistency between `docs/` and `docs_v2/`, `docs_v2/` should
-win — and we should either update or explicitly mark the legacy material as
-historical.

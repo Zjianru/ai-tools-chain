@@ -5,7 +5,7 @@
   "id": "M11-3",
   "title": "Planning Phase 迁移与加固",
   "scope": "完成 planning 文档重构与状态机/Schema 落地",
-  "assumptions": ["docs_v2 为新入口", "timeline 为唯一状态SSOT"],
+  "assumptions": ["docs 为新入口", "timeline 为唯一状态SSOT"],
   "risks": [{"id":"R1","desc":"锚点不一致导致断链","level":"medium"}],
   "milestones": [{"id":"M11","title":"Docs v2 基础骨架完成","eta":"2025-12-01"}],
   "tasks": [

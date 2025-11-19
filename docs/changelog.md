@@ -1,6 +1,6 @@
 # Changelog
 
-This changelog tracks **notable changes in the system design and docs_v2**,
+This changelog tracks **notable changes in the system design and docs**,
 not every code commit.
 
 Follow the principles of [Keep a Changelog](https://keepachangelog.com/)
@@ -17,7 +17,7 @@ Format:
 ## [Unreleased]
 
 ### Added
-- Initial docs_v2 structure:
+- Initial docs structure:
   - `00-intro.md`, `01-overview.md`, `README.md`.
 - System-level docs:
   - `system/architecture.md`
@@ -32,7 +32,7 @@ Format:
   - `planning/examples/*` (skeletons).
 
 ### Changed
-- Established docs_v2 as the canonical documentation set for:
+- Established docs as the canonical documentation set for:
   - system design,
   - workflows,
   - schemas.
@@ -40,22 +40,17 @@ Format:
 ### Fixed
 - Clarified the relationship between:
   - timeline ↔ tasks ↔ state.json.
-
-### Removed
-- (Nothing yet; legacy docs remain in `docs/` as historical reference.)
-
 ---
 
-## [2025-03-XX] - docs_v2 bootstrap
+## [2025-03-XX] - docs bootstrap
 
 > Replace `XX` with the actual date when stabilizing the initial set.
 
 ### Added
-- Bootstrapped docs_v2 with:
+- Bootstrapped docs with:
   - lifecycle, phases, workflows, agents, schemas, and planning docs.
 
 ### Changed
-- Marked `docs/` as legacy documentation (to be cleaned up gradually).
 
 ### Fixed
 - Made timeline semantics explicit and aligned them with task-level state.

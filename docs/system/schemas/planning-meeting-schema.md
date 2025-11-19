@@ -136,3 +136,19 @@ If sensitive content is logged:
 
 A future ADR may define redaction policies.
 
+## planning.memory.jsonl (optional)
+
+> **Implementation note (code ahead of docs)**
+> - Implemented in `src/planning/memory.mjs`.
+> - Not yet fully formalized in this schema document.
+
+Each line is a JSON object with:
+
+- `at`: ISO timestamp
+- `round`: optional planning round number
+- `role`: who produced the note
+- `kind`: `"note"` / `"decision"` / ...
+- `content`: free-form text
+
+This file acts as a lightweight memory log for the planning phase and may
+later be subsumed by a more formal schema.

@@ -34,6 +34,22 @@ The test phase should:
     - which commands to run,
     - which suites apply to this task.
 
+- `planning/planning.ai.json` (optional)
+  - If present, its `test_plan` field is used to summarize the intended test strategy.
+  
+### Inputs（补充）
+
+- 来自规划的测试计划（可选）：
+  - `planning/planning.ai.json` 中的 `test_plan` 字段；
+  - `planning/plan.md` 中的 “Test Plan / 测试计划摘要” 小节。
+
+实现备注：
+
+- 当前实现中，测试阶段主要由 `eval.conf` 与外部命令驱动；
+- `test_plan` 目前更多用于文档与报告，不会强制 gate；
+- 后续将：
+  - 把 `test_plan.cases` 作为测试用例生成/校验的来源之一；
+  - 在 `eval/eval-report.json` 中显式标记哪些用例已覆盖 / 未覆盖。
 ---
 
 ## 3. Process
@@ -74,7 +90,7 @@ Under the task directory:
 
 Schemas:
 
-- `docs_v2/system/schemas/eval-schema.md` (once defined).
+- `docs/system/schemas/eval-schema.md` (once defined).
 
 ---
 

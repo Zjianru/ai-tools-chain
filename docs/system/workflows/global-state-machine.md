@@ -11,6 +11,20 @@ It describes:
 
 This is the authoritative contract for task-level state transitions.
 
+> **Implementation status**
+> - Status: Partially implemented
+> - Current orchestrator:
+>   - Uses a linear list of phases:
+>     `planning → plan_review → codegen → code_review → code_review_meeting → test → accept`
+>   - Supports manual redo via `/redo <phase>` and state patches.
+>   - `revert` is currently a separate CLI command and not a formal phase in `state.json`.
+> - Code:
+>   - `src/core/orchestrator.mjs`
+>   - `src/cli/repl.mjs` (`/next`, `/redo`, `/revert`)
+> - Target:
+>   - Evolve the orchestrator to match this full state machine, including
+>     automated transitions and `revert` as a first-class phase.
+
 ---
 
 # 1. States

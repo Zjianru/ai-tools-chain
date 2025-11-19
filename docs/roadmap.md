@@ -94,7 +94,27 @@ should be reflected in the project timeline instead.
   - per-milestone progress,
   - status counts,
   - dependency graph.
+  
+### 5.1 Docs ↔ Code Alignment
 
+- [ ] 建立统一的实现进度索引：
+  - `system/implementation-status.md` 记录每个子系统的：
+    - spec 文档位置；
+    - 主实现文件；
+    - 状态（implemented / partial / not implemented / code ahead of docs）；
+    - 差异说明与下一步。
+- [ ] 为关键阶段补充实现状态：
+  - `system/phases/review.md` / `system/phases/accept.md`；
+  - `system/schemas/planning-schema.md` / `system/schemas/planning-meeting-schema.md`；
+  - 以及 Agents 文档（Planning / Review / Accept / Revert）。
+- [ ] 构建最小校验工具：
+  - 提供脚本检查：
+    - 文档中声明的 artifacts（如 `review/code-review.json`、`accept/decision.json`）是否在当前任务中存在；
+    - timeline 的 `accept_link` 是否有效；
+    - 规划 schema 字段与实际 JSON 是否一致（基础校验）。
+- [ ] 在 CI 中引入“文档契约检查”步骤（长期）：
+  - 使用同一套 schema / 治理规则；
+  - 在 PR 阶段阻止“实现大幅偏离文档而没有更新文档”的情况。
 ---
 
 ## 6. Providers & Profiles
@@ -128,7 +148,7 @@ should be reflected in the project timeline instead.
 
 ## 8. Documentation & Governance
 
-- [ ] Continue migration from `docs/` to `docs_v2/`:
+- [ ] Continue migration from `docs/` to `docs/`:
   - extract stable designs into `system/` and `planning/`,
   - convert major decisions into ADRs under `planning/adr/`.
 - [ ] Add more examples under `planning/examples/`:

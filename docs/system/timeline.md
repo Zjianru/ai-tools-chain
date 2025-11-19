@@ -41,7 +41,7 @@ This document focuses on semantics and behavior.
 
 By convention, the main timeline file lives at:
 
-- `docs_v2/planning/timeline.md` (or a project-specific location documented here).
+- `docs/planning/timeline.md` (or a project-specific location documented here).
 
 The file:
 
@@ -217,7 +217,7 @@ Informational, but can be used by tooling to:
 	•	Purpose: point to a design document, plan, or spec.
 
 Examples:
-	•	docs_v2/planning/examples/example-plan.md
+	•	docs/planning/examples/example-plan.md
 	•	.ai-tools-chain/tasks/<id>/planning/plan.md
 
 4.10 accept_link
@@ -264,11 +264,11 @@ A minimal example table (columns truncated for brevity):
 | id        | type    | title                               | milestone       | eta        | priority | status      | depends | design_link                             | accept_link                                      | notes                 |
 |-----------|---------|-------------------------------------|-----------------|------------|----------|-------------|---------|------------------------------------------|--------------------------------------------------|-----------------------|
 | TASK-001  | feature | End-to-end planning MVP             | M1: Planning    | 2025-03-15 | P0       | accepted    |         | .ai-tools-chain/tasks/TASK-001/plan.md  | .ai-tools-chain/tasks/TASK-001/accept/decision.json | First end-to-end demo |
-| TASK-002  | chore   | Refine timeline schema and enums    | M1: Planning    | 2025-03-20 | P1       | in-progress |         | docs_v2/planning/timeline-schema.md     |                                                  | Align docs and code   |
+| TASK-002  | chore   | Refine timeline schema and enums    | M1: Planning    | 2025-03-20 | P1       | in-progress |         | docs/planning/timeline-schema.md     |                                                  | Align docs and code   |
 | TASK-003  | spike   | Experiment with alternate providers | M2: Providers   | TBD        | P2       | idea        |         |                                          |                                                  |                        |
 
 The exact example(s) used in this repository live under:
-	•	docs_v2/planning/examples/example-timeline.md
+	•	docs/planning/examples/example-timeline.md
 
 and should conform to the schema defined in timeline-schema.md.
 
@@ -282,9 +282,8 @@ Because the timeline is central, any changes to:
 	•	semantics of status transitions,
 
 should be made via an ADR (Architecture Decision Record), referenced from:
-	•	docs_v2/planning/adr/
+	•	docs/planning/adr/
 
 This ensures that:
 	•	external tools can rely on a stable contract,
 	•	contributors understand why changes were made,
-	•	legacy timelines can be migrated if necessary.

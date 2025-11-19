@@ -44,16 +44,12 @@ The output should be good enough that:
   - Agents may build or use a repo summary if configured.
 
 - **Timeline entry**
-  - The task’s row in `docs_v2/planning/timeline.md`, if it exists.
+  - The task’s row in `docs/planning/timeline.md`, if it exists.
   - Used to pull:
     - `id`,
     - `milestone`,
     - `priority`,
     - `depends`.
-
-- **Legacy notes or specs**
-  - Linked via `design_link` in the timeline,
-  - or added manually to the brief.
 
 ---
 
@@ -105,8 +101,8 @@ All outputs are written under the task directory, typically:
 
 Schemas:
 
-- `docs_v2/system/schemas/planning-schema.md`
-- `docs_v2/system/schemas/planning-meeting-schema.md`
+- `docs/system/schemas/planning-schema.md`
+- `docs/system/schemas/planning-meeting-schema.md`
 
 ---
 

@@ -26,13 +26,6 @@ If you are new to the project, read in this order:
    - `roadmap.md` – Future directions and major TODOs.
    - `changelog.md` – Notable changes in the documentation and system design.
 
-## Relationship to `docs/` (legacy docs)
-
-- `docs/` contains the original, more narrative-style documentation.
-- `docs_v2/` is the structured, contract-oriented documentation set.
-- Over time, all **canonical** design, workflow and schema descriptions will live here.
-- Legacy docs may still contain nuanced discussions and historical notes; when a design is fully captured in `docs_v2/`, `docs/` should be treated as historical background only.
-
 ## Target audiences
 
 - **Contributors / maintainers** – Understand system design, constraints and contracts.

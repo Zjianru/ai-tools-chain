@@ -31,3 +31,34 @@
 - Workflows: ../system/workflows/planning-state-machine.md#diagram | ../system/workflows/global-state-machine.md#diagram
 - Schemas: ../system/schemas/planning-schema.md#fields | ../system/schemas/planning-meeting-schema.md#fields
 - Agents: ../system/agents/overview.md#overview | ../system/agents/orchestrator.md#overview | ../system/agents/planning-agent.md#overview
+
+
+
+## 外部集成 {#integrations}
+
+本项目依赖但不“吞掉”的外部系统包括：
+
+- **OpenSpec**
+  - 位置：`.ai-tools-chain/openspec/`（spec.yaml / schema.yaml / changes/*）
+  - 用途：
+    - 作为需求与变更的上游设计源；
+    - 通过 `ai-tools spec:*` 与 `/plan`，生成 `planning/planning.ai.json` 与 `planning/plan.md` 的草稿；
+    - 在规划阶段做结构与一致性检查（plan review）。
+  - 当前状态：🟡 部分实现
+    - 已有 `src/planning/openspecArtifacts.mjs` 与 `src/cli/pipelines/demoOpenspec.mjs` 可用作 demo；
+    - 尚未与 Timeline 与全生命周期自动打通（例如多任务、多变更协同）。
+
+- **promptfoo**
+  - 位置：`.ai-tools-chain/promptfoo/promptfooconfig.yaml`，由 `ai-tools init` 模板生成；
+  - 用途：
+    - 作为 eval pipeline 中的一种外部评测工具，通过 `eval.conf` 配置；
+    - 执行结果汇总到 `eval/eval-report.json`。
+  - 当前状态：🟡 部分实现
+    - 已能作为 eval 步骤被调用，但尚未在 schema 中专门建模 promptfoo 的结果结构。
+
+- **Git**
+  - 用途：
+    - 提供 diff 与文件快照（Review 阶段）；
+    - 提供提交与回滚能力（Accept / Revert 阶段）。
+  - 当前状态：🟡 部分实现
+    - Accept / Revert 已经使用 Git，但快照命名规则与元数据（例如与 `timeline` 的联动）仍在演进中。

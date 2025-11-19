@@ -139,7 +139,7 @@ The JSON structure describing:
 - file-level plan.
 
 Documented in:  
-`docs_v2/system/schemas/planning-schema.md`.
+`docs/system/schemas/planning-schema.md`.
 
 ---
 
@@ -148,7 +148,7 @@ A review step where multiple roles (Product, System Design, Engineering, Test, R
 evaluate the plan and output structured verdicts.
 
 Documented in:  
-`docs_v2/system/phases/plan-review.md`.
+`docs/system/phases/plan-review.md`.
 
 ---
 
@@ -210,10 +210,10 @@ Project-level table listing:
 
 The canonical file is:
 
-docs_v2/planning/timeline.md
+docs/planning/timeline.md
 
 Schema defined in:  
-`docs_v2/planning/timeline-schema.md`.
+`docs/planning/timeline-schema.md`.
 
 ---
 
