@@ -4,4 +4,5 @@ node_modules/
 .claude
 .tmp-tests
 .github
+.trae
 /scripts
