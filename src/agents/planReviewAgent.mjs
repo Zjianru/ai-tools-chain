@@ -18,6 +18,21 @@ export class PlanReviewAgent {
         fs.ensureDirSync(taskDir);
 
         const logs = [];
+        const planningJsonPath = resolve(taskDir, "planning", "planning.ai.json");
+        if (!fs.existsSync(planningJsonPath)) {
+            logs.push(
+                chalk.yellow(
+                    "规划尚未成功（缺少 planning.ai.json），请先在 /plan 阶段完成规划成功后再进行审查。"
+                )
+            );
+            return {
+                logs,
+                statePatch: {
+                    phase: "planning",
+                    actors: { plan_review: { status: "blocked" } }
+                }
+            };
+        }
         const {
             planningDir,
             planningPath,

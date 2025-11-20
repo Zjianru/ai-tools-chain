@@ -12,9 +12,10 @@ export async function runPlanningWithInputs({
     taskId,
     metaPath,
     inputs,
-    planning
+    planning,
+    writeMode = "formal"
 }) {
-    await generateOpenSpecAndPlan({ cwd, aiDir, tasksDir, taskId, inputs, planning });
+    await generateOpenSpecAndPlan({ cwd, aiDir, tasksDir, taskId, inputs, planning, writeMode });
     const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
     meta.status = "plan";
     writeFileSync(metaPath, JSON.stringify(meta, null, 2));
@@ -54,7 +55,8 @@ export async function callPlanningOnce({
     userBrief,
     history = [],
     round = 1,
-    draft = null
+    draft = null,
+    supplementalDocs = []
 }) {
     const taskDir = resolve(tasksDir, taskId);
     fs.ensureDirSync(taskDir);
@@ -68,7 +70,11 @@ export async function callPlanningOnce({
         repoSummary = "";
     }
 
-    const planningRes = await invokeRole("planning", { userBrief, repoSummary, history, draft }, { aiDir, cwd });
+    const planningRes = await invokeRole(
+        "planning",
+        { userBrief, repoSummary, history, draft, supplementalDocs },
+        { aiDir, cwd }
+    );
     if (!planningRes?.ok) {
         throw new Error(planningRes?.error || "planning 调用失败");
     }
@@ -86,6 +92,7 @@ export async function callPlanningOnce({
             user_brief: userBrief,
             repo_summary_sample: repoSummary.slice(0, 400),
             history,
+            supplemental_docs_count: Array.isArray(supplementalDocs) ? supplementalDocs.length : 0,
             usage: planningRes.usage || null
         };
         writeFileSync(resolve(logsDir, `planning.deepseek.${round}.json`), JSON.stringify(log, null, 2), "utf-8");
@@ -96,14 +103,16 @@ export async function callPlanningOnce({
     return planningRes;
 }
 
-export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning }) {
+export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning, writeMode = "formal" }) {
     const taskDir = resolve(tasksDir, taskId);
     fs.ensureDirSync(taskDir);
     const planningDir = resolve(taskDir, "planning");
     fs.ensureDirSync(planningDir);
 
-    const planningPath = resolve(planningDir, "planning.ai.json");
-    writeFileSync(planningPath, JSON.stringify(planning, null, 2), "utf-8");
+    if (writeMode === "formal") {
+        const planningPath = resolve(planningDir, "planning.ai.json");
+        writeFileSync(planningPath, JSON.stringify(planning, null, 2), "utf-8");
+    }
     const title = planning.meta?.title || planning.title || `Task ${taskId}`;
     const why = planning.why || "";
     const what = planning.what || "";
@@ -130,16 +139,18 @@ export async function applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, m
         accept: acceptance.join(",")
     };
 
-    if (Array.isArray(planning.draft_files) && planning.draft_files.length) {
-        const filesJsonPath = resolve(planningDir, "plan.files.json");
-        writeFileSync(
-            filesJsonPath,
-            JSON.stringify({ files: planning.draft_files }, null, 2),
-            "utf-8"
-        );
+    if (writeMode === "formal") {
+        if (Array.isArray(planning.draft_files) && planning.draft_files.length) {
+            const filesJsonPath = resolve(planningDir, "plan.files.json");
+            writeFileSync(
+                filesJsonPath,
+                JSON.stringify({ files: planning.draft_files }, null, 2),
+                "utf-8"
+            );
+        }
     }
 
-    await runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, metaPath, inputs, planning });
+    await runPlanningWithInputs({ cwd, aiDir, tasksDir, taskId, metaPath, inputs, planning, writeMode });
 }
 
 // 保留单次 AI 规划 + OpenSpec 的封装，供非交互式场景复用

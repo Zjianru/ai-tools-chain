@@ -3,6 +3,7 @@ node_modules/
 .DS_Store
 .claude
 .tmp-tests
+.tmp-tests/
 .github
 .trae
 /scripts

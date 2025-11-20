@@ -134,6 +134,15 @@ export async function handlePlanCommand({
 
     const rest = lineRaw.slice("/plan".length).trim();
     let brief = rest;
+    // 支持从命令行读取附件文件：格式 `/plan <brief...> --files <p1> <p2> ...`
+    let fileArgIndex = rest.indexOf("--files");
+    let fileArgPaths = [];
+    if (fileArgIndex !== -1) {
+        const before = rest.slice(0, fileArgIndex).trim();
+        const after = rest.slice(fileArgIndex + "--files".length).trim();
+        brief = before;
+        fileArgPaths = after.split(/\s+/).filter(Boolean);
+    }
     if (!brief) {
         brief = await ask(
             chalk.cyan("请输入本轮任务的标题/目标和简要需求（将作为 planning 的 brief）> ")
@@ -157,7 +166,30 @@ export async function handlePlanCommand({
         "utf-8"
     );
 
-    const ctxBase = { cwd, aiDir, tasksDir, taskId, metaPath, cfg };
+    // 附件文件读取（命令行 + uploads 目录）
+    const supplementalDocs = [];
+    const uploadsDir = resolve(tasksDir, taskId, "planning", "uploads");
+    const maxSize = 100 * 1024; // 100KB 上限
+    function tryReadFile(path) {
+        try {
+            const content = fs.readFileSync(path, "utf-8");
+            const text = content.length > maxSize ? content.slice(0, maxSize) : content;
+            supplementalDocs.push({ path, text });
+        } catch {}
+    }
+    fileArgPaths.forEach((p) => tryReadFile(resolve(cwd, p)));
+    if (fs.existsSync(uploadsDir)) {
+        try {
+            const files = fs.readdirSync(uploadsDir).map((n) => resolve(uploadsDir, n));
+            files.forEach((p) => {
+                if (p.endsWith(".md") || p.endsWith(".txt") || p.endsWith(".json") || p.endsWith(".yaml") || p.endsWith(".yml")) {
+                    tryReadFile(p);
+                }
+            });
+        } catch {}
+    }
+
+    const ctxBase = { cwd, aiDir, tasksDir, taskId, metaPath, cfg, supplementalDocs };
     try {
         const agent = new PlanningAgent();
         const result = await agent.step(ctxBase);

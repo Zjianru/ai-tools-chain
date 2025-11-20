@@ -33,7 +33,7 @@ export class PlanningAgent {
      * - 澄清问题不再阻塞 /plan，会以 open_questions/assumptions 的形式体现在 planning.ai.json 中。
      */
     async step(ctx) {
-        const { cwd, aiDir, tasksDir, taskId, metaPath } = ctx;
+        const { cwd, aiDir, tasksDir, taskId, metaPath, supplementalDocs = [] } = ctx;
         const logs = [];
         const taskDir = resolve(tasksDir, taskId);
         const planningDir = resolve(taskDir, "planning");
@@ -85,7 +85,8 @@ export class PlanningAgent {
                 userBrief: userBriefPayload,
                 history,
                 round,
-                draft
+                draft,
+                supplementalDocs
             });
 
             if (res.planning) {
@@ -109,22 +110,42 @@ export class PlanningAgent {
         }
 
         try {
-            await applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning });
             const rounds = usedRound || 1;
             const reqCount = Array.isArray(planning.requirements) ? planning.requirements.length : 0;
             const files = Array.isArray(planning.draft_files) ? planning.draft_files : [];
-            const why = planning.why || "";
-            const what = planning.what || "";
-            const tasks = Array.isArray(planning.tasks) ? planning.tasks : [];
-            const risks = Array.isArray(planning.risks) ? planning.risks : planning.risks ? [planning.risks] : [];
             const acceptance = Array.isArray(planning.acceptance)
                 ? planning.acceptance
                 : planning.acceptance
                 ? [planning.acceptance]
                 : [];
+            const qualitySufficient = reqCount > 0 && files.length > 0 && acceptance.length > 0;
 
-            logs.push(chalk.cyan(`已通过 AI + openspec 生成 plan：.ai-tools-chain/tasks/${taskId}/planning/plan.md`));
-            logs.push(chalk.gray(`规划详情：.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json（含 draft_files）`));
+            let writeMode = "none";
+            if (qualitySufficient) {
+                writeMode = "formal";
+            } else if (rounds <= 2) {
+                writeMode = "none";
+            } else {
+                writeMode = "draft";
+            }
+
+            await applyPlanningAndOpenSpec({ cwd, aiDir, tasksDir, taskId, metaPath, planning, writeMode });
+
+            // 复用前面已计算的 reqCount / acceptance / files
+            const why = planning.why || "";
+            const what = planning.what || "";
+            const tasks = Array.isArray(planning.tasks) ? planning.tasks : [];
+            const risks = Array.isArray(planning.risks) ? planning.risks : planning.risks ? [planning.risks] : [];
+
+            const planMdPath = `.ai-tools-chain/tasks/${taskId}/planning/plan.md`;
+            const planJsonPath = `.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json`;
+            if (writeMode === "formal") {
+                logs.push(chalk.cyan(`规划成功：请查看规划案 ${planJsonPath} 与规划草案 ${planMdPath}`));
+            } else if (writeMode === "draft") {
+                logs.push(chalk.yellow(`规划失败：仅生成规划草案，请查看 ${planMdPath}`));
+            } else {
+                logs.push(chalk.gray("本轮为澄清轮次，未生成规划产物。"));
+            }
             logs.push(chalk.cyan("\n规划摘要："));
             logs.push(`  标题：${planning.title || `Task ${taskId}`}`);
             if (why) logs.push(`  Why：${why}`);
@@ -166,36 +187,36 @@ export class PlanningAgent {
             }
             if (rounds > 1) {
                 logs.push(chalk.gray(`  AI 共进行了 ${rounds - 1} 轮澄清问答。`));
-            } else {
-                logs.push(chalk.gray("  AI 认为现有信息已足够，无需额外澄清。"));
             }
 
             // 在 /plan 阶段内部串联规划审查与规划会议视角
-            try {
-                const review = runPlanReviewCore({ tasksDir, taskId });
-                logs.push(
-                    chalk.cyan(
-                        `已生成规划审查结果：.ai-tools-chain/tasks/${taskId}/planning/plan-review.json`
-                    )
-                );
-                logs.push(
-                    chalk.gray(
-                        `人类可读版：.ai-tools-chain/tasks/${taskId}/planning/plan-review.md`
-                    )
-                );
-                if (!review.ok) {
+            if (writeMode === "formal") {
+                try {
+                    const review = runPlanReviewCore({ tasksDir, taskId });
+                    logs.push(
+                        chalk.cyan(
+                            `已生成规划审查结果：.ai-tools-chain/tasks/${taskId}/planning/plan-review.json`
+                        )
+                    );
+                    logs.push(
+                        chalk.gray(
+                            `人类可读版：.ai-tools-chain/tasks/${taskId}/planning/plan-review.md`
+                        )
+                    );
+                    if (!review.ok) {
+                        logs.push(
+                            chalk.yellow(
+                                "提示：规划存在阻塞性问题，建议在进入 codegen 前先根据审查结果修正规划。"
+                            )
+                        );
+                    }
+                } catch (e) {
                     logs.push(
                         chalk.yellow(
-                            "提示：规划存在阻塞性问题，建议在进入 codegen 前先根据审查结果修正规划。"
+                            `规划审查（plan-review）阶段内部执行失败：${e.message || e}（已跳过，不影响本轮规划产物写入）`
                         )
                     );
                 }
-            } catch (e) {
-                logs.push(
-                    chalk.yellow(
-                        `规划审查（plan-review）阶段内部执行失败：${e.message || e}（已跳过，不影响本轮规划产物写入）`
-                    )
-                );
             }
 
             try {
@@ -216,16 +237,20 @@ export class PlanningAgent {
                 );
             }
 
-            logs.push(
-                chalk.gray(
-                    `\n详细规划文件：.ai-tools-chain/tasks/${taskId}/planning/plan.md（供人工查看）`
-                )
-            );
-            logs.push(
-                chalk.gray(
-                    `结构化规划 JSON：.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json（供后续阶段使用）`
-                )
-            );
+            if (writeMode !== "none") {
+                logs.push(
+                    chalk.gray(
+                        `\n详细规划文件：.ai-tools-chain/tasks/${taskId}/planning/plan.md（供人工查看）`
+                    )
+                );
+            }
+            if (writeMode === "formal") {
+                logs.push(
+                    chalk.gray(
+                        `结构化规划 JSON：.ai-tools-chain/tasks/${taskId}/planning/planning.ai.json（供后续阶段使用）`
+                    )
+                );
+            }
             logs.push(
                 chalk.gray(
                     "下一步可：直接 /codegen 进入生成，或使用 /next 根据当前状态查看推荐。"
@@ -276,9 +301,13 @@ export class PlanningAgent {
             return {
                 logs,
                 statePatch: {
-                    phase: "planning_done",
+                    phase: writeMode === "formal" ? "planning_done" : "planning",
                     actors: {
-                        planning: { round: usedRound, status: "completed" }
+                        planning: {
+                            round: usedRound,
+                            status: writeMode === "formal" ? "completed" : "pending",
+                            success: writeMode === "formal"
+                        }
                     }
                 }
             };

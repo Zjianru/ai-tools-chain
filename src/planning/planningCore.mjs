@@ -11,20 +11,29 @@ export async function generateOpenSpecAndPlan({
     tasksDir,
     taskId,
     inputs,
-    planning
+    planning,
+    writeMode = "formal"
 }) {
-    const openspecPlanMd = await generateOpenSpecArtifacts({
-        aiDir,
-        tasksDir,
-        taskId,
-        inputs,
-        planning
-    });
-    generateHumanPlanMd({
-        tasksDir,
-        taskId,
-        inputs,
-        planning,
-        openspecPlanMd
-    });
+    if (writeMode === "formal") {
+        const openspecPlanMd = await generateOpenSpecArtifacts({
+            aiDir,
+            tasksDir,
+            taskId,
+            inputs,
+            planning
+        });
+        generateHumanPlanMd({
+            tasksDir,
+            taskId,
+            inputs,
+            planning,
+            openspecPlanMd
+        });
+        return;
+    }
+    if (writeMode === "draft") {
+        generateHumanPlanMd({ tasksDir, taskId, inputs, planning, openspecPlanMd: null });
+        return;
+    }
+    // writeMode === "none" → 跳过生成
 }

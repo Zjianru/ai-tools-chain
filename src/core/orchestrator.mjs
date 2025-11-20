@@ -84,6 +84,29 @@ export function suggestNextFromState(tasksDir, taskId) {
         }
     }
 
+    // 规划阶段推进条件：需“规划成功”（存在 JSON 与非空 MD，或状态标记）
+    if (currentPhase === "planning") {
+        const taskDir = resolve(tasksDir, taskId);
+        const planningDir = resolve(taskDir, "planning");
+        const planningJsonPath = resolve(planningDir, "planning.ai.json");
+        const planMdPath = resolve(planningDir, "plan.md");
+        const successFlag = Boolean(state?.actors?.planning?.success);
+        let hasJson = false;
+        let hasMd = false;
+        if (existsSync(planningJsonPath)) hasJson = true;
+        try {
+            const md = readFileSync(planMdPath, "utf-8");
+            if (md && md.trim()) hasMd = true;
+        } catch {}
+        if (!(successFlag || (hasJson && hasMd))) {
+            return {
+                phase: "planning",
+                reason: "planning_not_ready",
+                details: { json: hasJson, md: hasMd, successFlag }
+            };
+        }
+    }
+
     const next = nextPhase(currentPhase);
     return {
         phase: next,
