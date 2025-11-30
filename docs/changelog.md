@@ -42,7 +42,7 @@ Format:
   - timeline ↔ tasks ↔ state.json.
 ---
 
-## [2025-03-XX] - docs bootstrap
+## [2025-11-XX] - docs bootstrap
 
 > Replace `XX` with the actual date when stabilizing the initial set.
 

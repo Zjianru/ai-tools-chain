@@ -263,8 +263,8 @@ A minimal example table (columns truncated for brevity):
 
 | id        | type    | title                               | milestone       | eta        | priority | status      | depends | design_link                             | accept_link                                      | notes                 |
 |-----------|---------|-------------------------------------|-----------------|------------|----------|-------------|---------|------------------------------------------|--------------------------------------------------|-----------------------|
-| TASK-001  | feature | End-to-end planning MVP             | M1: Planning    | 2025-03-15 | P0       | accepted    |         | .ai-tools-chain/tasks/TASK-001/plan.md  | .ai-tools-chain/tasks/TASK-001/accept/decision.json | First end-to-end demo |
-| TASK-002  | chore   | Refine timeline schema and enums    | M1: Planning    | 2025-03-20 | P1       | in-progress |         | docs/planning/timeline-schema.md     |                                                  | Align docs and code   |
+| TASK-001  | feature | End-to-end planning MVP             | M1: Planning    | 2025-11-15 | P0       | accepted    |         | .ai-tools-chain/tasks/TASK-001/plan.md  | .ai-tools-chain/tasks/TASK-001/accept/decision.json | First end-to-end demo |
+| TASK-002  | chore   | Refine timeline schema and enums    | M1: Planning    | 2025-11-20 | P1       | in-progress |         | docs/planning/timeline-schema.md     |                                                  | Align docs and code   |
 | TASK-003  | spike   | Experiment with alternate providers | M2: Providers   | TBD        | P2       | idea        |         |                                          |                                                  |                        |
 
 The exact example(s) used in this repository live under:

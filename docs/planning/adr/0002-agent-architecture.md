@@ -1,7 +1,7 @@
 # ADR 0002 – Multi-Agent Architecture
 
 **Status:** Accepted  
-**Date:** 2025-03-02  
+**Date:** 2025-11-02  
 **Deciders:** Project authors  
 **Supersedes:** None
 

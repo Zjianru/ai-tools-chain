@@ -1,7 +1,7 @@
 # ADR 0001 – Directory Structure for Task Artifacts
 
 **Status:** Accepted  
-**Date:** 2025-03-01  
+**Date:** 2025-11-01  
 **Deciders:** Project authors  
 **Supersedes:** None
 
